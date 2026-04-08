@@ -1,17 +1,19 @@
 import streamlit as st
-from services.usuarios_services import autenticar_usuario
+from services.responsables_service import login_responsable
+import sys
+from pathlib import Path
+
+# Agregar la raíz del proyecto al path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def login_page():
-    """Página de login"""
-    
     st.set_page_config(page_title="Login - Dashboard", layout="centered")
 
     if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
         st.session_state.usuario = None
 
-    # CSS personalizado
     st.markdown("""
         <style>
         .login-container {
@@ -26,9 +28,9 @@ def login_page():
     st.subheader("Inicia sesión en tu cuenta")
 
     with st.form("login_form"):
-        username = st.text_input(
-            "👤 Nombre de usuario",
-            placeholder="Ingresa tu nombre de usuario"
+        correo = st.text_input(
+            "📧 Correo",
+            placeholder="Ingresa tu correo"
         )
         password = st.text_input(
             "🔑 Contraseña",
@@ -38,24 +40,28 @@ def login_page():
         submit_login = st.form_submit_button("Iniciar Sesión", use_container_width=True)
 
     if submit_login:
-        if not username or not password:
+        if not correo or not password:
             st.error("⚠️ Por favor completa todos los campos")
         else:
             with st.spinner("Verificando credenciales..."):
-                resultado = autenticar_usuario(username, password)
-            if resultado["exito"]:
+                usuario = login_responsable(correo, password)
+
+            if usuario:
                 st.session_state.autenticado = True
-                st.session_state.usuario = resultado["usuario"]
-                st.success(f"✅ {resultado['mensaje']}")
-                st.info(f"Bienvenido, {resultado['usuario']['nombre']}!")
-                st.rerun()
+                st.session_state.usuario = usuario
+                st.session_state.rol = usuario["rol"]
+                st.session_state.nombre = usuario["nom_res"]
+                st.success(f"✅ Bienvenido, {usuario['nom_res']}!")
+
+                if usuario["rol"] == "admin":
+                    st.switch_page("pages/admin_dashboard.py")
+                else:
+                    st.switch_page("pages/trabajador_panel.py")
             else:
-                st.error(f"❌ {resultado['mensaje']}")
+                st.error("❌ Correo o contraseña incorrectos")
 
     st.write("---")
-    st.info(
-        "Si no tienes cuenta aún, obtén tus credenciales desde Supabase o solicita acceso al administrador."
-    )
+    st.info("Si no tienes cuenta, solicita acceso al administrador.")
     st.markdown("""
         <div style='text-align: center; color: #666;'>
             <small>Proyecto Dashboard © 2026 | Sistema de Gestión de Tareas</small>
