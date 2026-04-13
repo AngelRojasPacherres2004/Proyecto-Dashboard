@@ -1,5 +1,5 @@
 import streamlit as st
-from services.responsables_service import login_responsable
+from services.mysql_auth_service import login_responsable
 import sys
 from pathlib import Path
 
@@ -8,8 +8,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def login_page():
-    st.set_page_config(page_title="Login - Dashboard", layout="centered")
-
     if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
         st.session_state.usuario = None
