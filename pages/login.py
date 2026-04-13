@@ -1,10 +1,51 @@
 import streamlit as st
-from services.mysql_auth_service import login_responsable
 import sys
 from pathlib import Path
 
+from config.BD_Client import get_connection
+from utils.auth import verify_password
+
 # Agregar la raíz del proyecto al path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+def login_responsable(correo: str, contrasena: str):
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT id, nom_res, correo, password_hash, rol, estado, fecha_creacion
+            FROM responsables
+            WHERE correo = %s
+            LIMIT 1
+            """,
+            (correo,),
+        )
+        usuario = cursor.fetchone()
+
+        if not usuario or usuario["estado"] != "activo":
+            return None
+
+        password_guardado = usuario["password_hash"]
+
+        if contrasena == password_guardado or verify_password(contrasena, password_guardado):
+            return {
+                "id": usuario["id"],
+                "nom_res": usuario["nom_res"],
+                "correo": usuario["correo"],
+                "rol": usuario["rol"],
+                "estado": usuario["estado"],
+                "fecha_creacion": usuario["fecha_creacion"],
+            }
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None and conn.is_connected():
+            conn.close()
 
 
 def login_page():
