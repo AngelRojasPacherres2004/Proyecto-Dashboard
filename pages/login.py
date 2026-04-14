@@ -55,6 +55,11 @@ def login_page():
 
     st.markdown("""
         <style>
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarNav"],
+        [data-testid="stSidebarCollapsedControl"] {
+            display: none !important;
+        }
         .login-container {
             max-width: 400px;
             margin: 50px auto;

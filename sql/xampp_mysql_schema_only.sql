@@ -15,13 +15,13 @@ CREATE TABLE IF NOT EXISTS responsables (
 );
 
 INSERT INTO responsables (nom_res, correo, password_hash, rol, estado)
-SELECT 'Administrador', 'admin@dashboard.com', 'ac9689e2272427085e35b9d3e3e8bed88cb3434828b43b86fc0596cad4c6e270', 'admin', 'activo'
+SELECT 'Administrador', 'admin@dashboard.com', '123', 'admin', 'activo'
 WHERE NOT EXISTS (
   SELECT 1 FROM responsables WHERE correo = 'admin@dashboard.com'
 );
 
 INSERT INTO responsables (nom_res, correo, password_hash, rol, estado)
-SELECT 'Trabajador Demo', 'trabajador@dashboard.com', '2e80a850b7752ec924b107f72526449f7bbe5c6024777a1390b26525b01b5d05', 'trabajador', 'activo'
+SELECT 'Trabajador Demo', 'trabajador@dashboard.com', '123', 'trabajador', 'activo'
 WHERE NOT EXISTS (
   SELECT 1 FROM responsables WHERE correo = 'trabajador@dashboard.com'
 );
