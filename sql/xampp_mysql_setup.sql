@@ -20,6 +20,25 @@ CREATE TABLE IF NOT EXISTS responsables (
   fecha_creacion TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS registros_trabajador (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  anio INT NOT NULL,
+  empresa VARCHAR(150) NOT NULL,
+  proyecto VARCHAR(150) NOT NULL,
+  tarea VARCHAR(200) NOT NULL,
+  mes_t VARCHAR(40) NOT NULL,
+  encargado VARCHAR(120) NOT NULL,
+  fecha_realizada DATE NOT NULL,
+  fecha_meta DATE NOT NULL,
+  cantidad INT NOT NULL DEFAULT 0,
+  prioridad ENUM('Alta', 'Media', 'Baja') NOT NULL,
+  responsable_id INT NULL,
+  fecha_registro TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_registro_responsable
+    FOREIGN KEY (responsable_id) REFERENCES responsables(id)
+    ON DELETE SET NULL
+);
+
 INSERT INTO responsables (nom_res, correo, password_hash, rol, estado)
 SELECT 'Administrador', 'admin@dashboard.com', '123', 'admin', 'activo'
 WHERE NOT EXISTS (
