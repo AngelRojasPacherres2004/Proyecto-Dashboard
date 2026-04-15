@@ -35,10 +35,10 @@ def main():
         login_page()
     else:
         # Si alguien llega aquí ya autenticado, redirigir según rol
-        if st.session_state.get("rol") == "administrador":
+        if st.session_state.get("rol") == "admin":
             st.switch_page("pages/admin_dashboard.py")
         else:
-            st.switch_page("pages/trabajador_panel.py")
+            st.switch_page("pages/trabajador_registro_moderno.py")
 
 if __name__ == "__main__":
     main()
