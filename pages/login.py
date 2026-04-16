@@ -100,8 +100,6 @@ def login_page():
             align-items: stretch;
         }
         .login-hero {
-            min-height: 630px;
-            padding: 2.2rem 2rem;
             height: 630px;
             padding: 3rem 2.2rem;
             border-radius: 32px;
@@ -151,7 +149,6 @@ def login_page():
             color: #f6e9d7;
         }
         .login-card {
-            min-height: 630px;
             height: 630px;
             border-radius: 32px;
             padding: 1.4rem;
@@ -228,7 +225,6 @@ def login_page():
             border: none !important;
             background: transparent !important;
             padding: 0 !important;
-            min-height: 630px;
             height: 630px;
             border-radius: 32px !important;
             padding: 1.4rem !important;
@@ -238,7 +234,6 @@ def login_page():
             backdrop-filter: blur(18px) !important;
         }
         [data-testid="stForm"] > div:first-child {
-            padding: 1.4rem 1.3rem 1.2rem !important;
             padding: 3rem 2.2rem !important;
             background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05)) !important;
             border: 1px solid rgba(255,255,255,0.08) !important;

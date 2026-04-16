@@ -13,7 +13,7 @@ def hash_password(password: str) -> str:
     Returns:
         Hash de la contraseña
     """
-    return hashlib.sha256(password.encode()).hexdigest()
+    return password
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
@@ -27,7 +27,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
     Returns:
         True si coinciden, False en caso contrario
     """
-    return hash_password(password) == hashed_password
+    return password == hashed_password
 
 
 def generate_token() -> str:
