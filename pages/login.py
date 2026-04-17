@@ -319,7 +319,7 @@ def login_page():
                     st.session_state.rol = usuario["rol"]
                     st.session_state.nombre = usuario["nom_res"]
                     st.success(f"Bienvenido, {usuario['nom_res']}.")
-                    st.switch_page("pages/admin_dashboard.py" if usuario["rol"] == "admin" else "pages/trabajador_registro_moderno.py")
+                    st.switch_page("pages/admin_dashboard.py" if usuario["rol"] == "admin" else "pages/trabajador_registro.py")
                 else:
                     st.error("Usuario o contraseña incorrectos.")
 

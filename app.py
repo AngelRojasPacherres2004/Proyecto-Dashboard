@@ -38,7 +38,7 @@ def main():
         if st.session_state.get("rol") == "admin":
             st.switch_page("pages/admin_dashboard.py")
         else:
-            st.switch_page("pages/trabajador_registro_moderno.py")
+            st.switch_page("pages/trabajador_registro.py")
 
 if __name__ == "__main__":
     main()
