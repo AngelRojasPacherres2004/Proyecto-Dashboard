@@ -1,4 +1,6 @@
 import streamlit as st
+import base64
+from pathlib import Path
 
 from config.BD_Client import get_connection
 
@@ -59,270 +61,212 @@ def guardar_registro_trabajador(
 
 
 st.set_page_config(page_title="Registro del Trabajador", layout="wide")
-st.markdown(
-    """
+fondo_path = Path(__file__).parent / "fondo login.png"
+fondo_b64 = ""
+if fondo_path.exists():
+    fondo_b64 = base64.b64encode(fondo_path.read_bytes()).decode("utf-8")
+
+css_registro = """
     <style>
     .stApp {
         background:
-            radial-gradient(circle at 14% 18%, rgba(255, 196, 126, 0.32), transparent 22%),
-            radial-gradient(circle at 88% 12%, rgba(68, 176, 213, 0.26), transparent 25%),
-            linear-gradient(180deg, #fbf4ea 0%, #eef5f8 52%, #edf2f5 100%);
+            linear-gradient(rgba(8, 9, 14, 0.45), rgba(8, 9, 14, 0.65)),
+            url("data:image/png;base64,__FONDO_B64__");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
     }
-    [data-testid="stSidebar"],
-    [data-testid="stSidebarNav"],
-    [data-testid="stSidebarCollapsedControl"] {
+    [data-testid="stSidebar"], [data-testid="stSidebarNav"], [data-testid="stSidebarCollapsedControl"] {
         display: none !important;
     }
-    .shell {
-        max-width: 1120px;
+    .login-shell {
+        max-width: 1200px;
         margin: 0 auto;
-        padding: 1.05rem 1rem 2.5rem;
+        padding: 2rem 1rem;
     }
-    .hero {
-        border-radius: 30px;
-        padding: 1.8rem;
-        color: #f7fbff;
-        background:
-            linear-gradient(135deg, rgba(15, 39, 63, 0.98), rgba(13, 111, 120, 0.92)),
-            linear-gradient(90deg, #0f273f, #0d6f78);
-        box-shadow: 0 24px 54px rgba(25, 48, 67, 0.18);
-        position: relative;
-        overflow: hidden;
+    .login-grid {
+        display: grid;
+        grid-template-columns: 0.8fr 1.2fr;
+        gap: 1.5rem;
+        align-items: stretch;
     }
-    .hero::before {
-        content: "";
-        position: absolute;
-        width: 280px;
-        height: 280px;
-        right: -80px;
-        top: -120px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.08);
+    .login-hero {
+        padding: 2.5rem 2.2rem;
+        border-radius: 32px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255,255,255,0.08);
+        backdrop-filter: blur(12px);
+        color: #f4efe8;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
     }
-    .badge {
+    .login-badge {
         display: inline-block;
-        padding: 0.35rem 0.8rem;
+        padding: 0.4rem 0.9rem;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.14);
+        background: rgba(255, 201, 126, 0.14);
+        color: #ffd8a5;
         font-size: 0.78rem;
         font-weight: 800;
         letter-spacing: 0.08em;
-        margin-bottom: 0.95rem;
-    }
-    .hero-title {
-        font-size: 2.5rem;
-        font-weight: 900;
-        line-height: 1.02;
-        letter-spacing: -0.04em;
-        max-width: 720px;
-        margin-bottom: 0.65rem;
-    }
-    .hero-copy {
-        max-width: 700px;
-        line-height: 1.65;
-        font-size: 1rem;
-        opacity: 0.93;
-    }
-    .top-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.9rem;
-        margin-bottom: 1rem;
-    }
-    .metrics {
-        display: grid;
-        grid-template-columns: 1.3fr 0.8fr 0.8fr;
-        gap: 1rem;
-        margin: 1.2rem 0 1.35rem;
-    }
-    .metric {
-        border-radius: 22px;
-        padding: 1rem 1.1rem;
-        background: rgba(255, 255, 255, 0.74);
-        border: 1px solid rgba(103, 130, 146, 0.16);
-        backdrop-filter: blur(10px);
-        box-shadow: 0 16px 30px rgba(43, 61, 74, 0.08);
-    }
-    .metric-label {
-        font-size: 0.76rem;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        color: #617989;
-        margin-bottom: 0.28rem;
-    }
-    .metric-value {
-        font-size: 1.02rem;
-        font-weight: 800;
-        color: #173a4f;
-    }
-    .form-shell {
-        background: rgba(255, 255, 255, 0.86);
-        border: 1px solid rgba(112, 137, 152, 0.16);
-        border-radius: 30px;
-        padding: 1.55rem;
-        box-shadow: 0 24px 40px rgba(44, 63, 75, 0.08);
-    }
-    .form-heading {
-        font-size: 1.18rem;
-        font-weight: 900;
-        color: #18384a;
-        margin-bottom: 0.2rem;
-    }
-    .form-copy {
-        color: #657f8e;
         margin-bottom: 1.2rem;
     }
-    .field-card {
-        border-radius: 24px;
-        padding: 0.85rem 0.95rem;
-        background: linear-gradient(180deg, #fbfdff 0%, #f2f8fb 100%);
-        border: 1px solid #d9e4eb;
+    .login-title {
+        font-size: 2.8rem;
+        font-weight: 900;
+        line-height: 1.05;
+        letter-spacing: -0.04em;
+        margin-bottom: 1.2rem;
+        color: #fff;
+    }
+    .metric-card {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+        padding: 1.2rem;
+        border-radius: 20px;
         margin-bottom: 1rem;
     }
+    .metric-label { font-size: 0.72rem; color: #f6c27d; font-weight: 800; letter-spacing: 0.05em; }
+    .metric-value { font-size: 1.15rem; color: #fff; font-weight: 700; margin-top: 0.2rem; }
+
+    [data-testid="stForm"] {
+        background: rgba(255, 255, 255, 0.09) !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        border-radius: 32px !important;
+        padding: 0 !important;
+        backdrop-filter: blur(20px) !important;
+        box-shadow: 0 24px 60px rgba(0,0,0,0.35) !important;
+    }
+    [data-testid="stForm"] > div:first-child {
+        padding: 2.5rem !important;
+        background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03)) !important;
+        border-radius: 24px !important;
+    }
     .field-label {
-        font-size: 0.79rem;
+        font-size: 0.75rem;
         font-weight: 800;
         letter-spacing: 0.08em;
-        color: #355468;
-        margin-bottom: 0.42rem;
+        color: #f6c27d;
+        margin-bottom: 0.5rem;
+        margin-top: 0.8rem;
     }
-    .stTextInput input,
-    .stNumberInput input,
-    .stDateInput input,
-    .stSelectbox div[data-baseweb="select"] > div {
-        min-height: 3.1rem !important;
-        background: white !important;
-        border: 1px solid #d3dfe7 !important;
-        border-radius: 16px !important;
-        box-shadow: none !important;
-    }
-    .stButton button,
-    .stForm button {
-        min-height: 3.05rem !important;
-        border-radius: 16px !important;
-        font-weight: 800 !important;
+    .stTextInput input, .stNumberInput input, .stDateInput input, .stSelectbox div[data-baseweb="select"] > div {
+        min-height: 3rem !important;
+        background: rgba(255,255,255,0.08) !important;
+        border: 1px solid rgba(255,255,255,0.15) !important;
+        color: white !important;
+        border-radius: 14px !important;
     }
     .stForm [data-testid="stFormSubmitButton"] button {
-        background: linear-gradient(135deg, #ef7d57 0%, #d8574e 100%) !important;
-        color: white !important;
+        margin-top: 1.5rem;
+        min-height: 3.3rem !important;
+        background: linear-gradient(135deg, #ffd18e 0%, #f0a84f 100%) !important;
+        color: #1d1611 !important;
+        font-weight: 800 !important;
+        border-radius: 16px !important;
         border: none !important;
-        box-shadow: 0 16px 28px rgba(216, 87, 78, 0.24);
+        box-shadow: 0 10px 20px rgba(240, 168, 79, 0.2);
+    }
+    .nav-button button {
+        background: rgba(255,255,255,0.05) !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
+        color: #fff !important;
+        border-radius: 12px !important;
     }
     @media (max-width: 900px) {
-        .metrics {
-            grid-template-columns: 1fr;
-        }
-        .hero-title {
-            font-size: 1.9rem;
-        }
-        .top-actions {
-            grid-template-columns: 1fr;
-        }
+        .login-grid { grid-template-columns: 1fr; }
     }
     </style>
-    """,
-    unsafe_allow_html=True,
-)
+    """
+st.markdown(css_registro.replace("__FONDO_B64__", fondo_b64), unsafe_allow_html=True)
 
-st.markdown('<div class="shell">', unsafe_allow_html=True)
+st.markdown('<div class="login-shell">', unsafe_allow_html=True)
 
-st.markdown('<div class="top-actions">', unsafe_allow_html=True)
-left_action, right_action = st.columns(2)
-with left_action:
-    if st.button("← Retroceder", use_container_width=True):
-        st.switch_page("app.py")
-with right_action:
-    if st.button("Cerrar sesión", use_container_width=True):
+# Botones de navegación superiores
+col_nav1, col_nav2 = st.columns([4, 1])
+with col_nav1:
+    st.markdown('<div class="nav-button">', unsafe_allow_html=True)
+    if st.button("← Inicio"): st.switch_page("app.py")
+    st.markdown('</div>', unsafe_allow_html=True)
+with col_nav2:
+    st.markdown('<div class="nav-button">', unsafe_allow_html=True)
+    if st.button("Cerrar Sesión"):
         st.session_state.clear()
         st.switch_page("pages/login.py")
-st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown(
-    """
-    <div class="hero">
-        <div class="badge">REGISTRO OPERATIVO</div>
-        <div class="hero-title">Un formulario más moderno para registrar avances</div>
-        <div class="hero-copy">
-            Completa la información del proyecto, tarea y fechas clave. Los campos de fecha usan calendario visual para que el ingreso sea más cómodo y preciso.
+st.markdown('<div class="login-grid">', unsafe_allow_html=True)
+
+# Columna Izquierda: Hero / Info
+with st.container():
+    st.markdown(
+        f"""
+        <div class="login-hero">
+            <div>
+                <div class="login-badge">REGISTRO OPERATIVO</div>
+                <h1 class="login-title">Control de Avances</h1>
+                <p style="opacity:0.85; line-height:1.7;">Registra tus actividades diarias con precisión. Toda la información se sincroniza directamente con el panel de administración para seguimiento en tiempo real.</p>
+            </div>
+            <div>
+                <div class="metric-card">
+                    <div class="metric-label">TRABAJADOR</div>
+                    <div class="metric-value">{st.session_state.get('nombre', 'Usuario')}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">ESTADO DEL SISTEMA</div>
+                    <div class="metric-value">✓ Conectado</div>
+                </div>
+            </div>
         </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        """,
+        unsafe_allow_html=True
+    )
 
-st.markdown(
-    f"""
-    <div class="metrics">
-        <div class="metric">
-            <div class="metric-label">TRABAJADOR</div>
-            <div class="metric-value">{st.session_state.get('nombre')}</div>
-        </div>
-        <div class="metric">
-            <div class="metric-label">ROL</div>
-            <div class="metric-value">{st.session_state.get('rol', 'trabajador')}</div>
-        </div>
-        <div class="metric">
-            <div class="metric-label">ESTADO</div>
-            <div class="metric-value">Formulario activo</div>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+# Columna Derecha: Formulario
+with st.container():
+    with st.form("registro_trabajador_form"):
+        st.markdown('<div style="color:#fff8f0; font-size:1.8rem; font-weight:900; margin-bottom:0.5rem; letter-spacing:-0.03em;">Detalles de la Tarea</div>', unsafe_allow_html=True)
+        st.markdown('<div style="color:rgba(255,255,255,0.7); margin-bottom:1.5rem; font-size:0.95rem;">Ingresa los datos para guardar el registro oficial.</div>', unsafe_allow_html=True)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown('<div class="field-label">AÑO</div>', unsafe_allow_html=True)
+            anio = st.number_input("AÑO", min_value=2000, max_value=2100, value=2026, label_visibility="collapsed")
+            
+            st.markdown('<div class="field-label">EMPRESA</div>', unsafe_allow_html=True)
+            empresa = st.text_input("EMPRESA", placeholder="Nombre de la empresa", label_visibility="collapsed")
+            
+            st.markdown('<div class="field-label">PROYECTO</div>', unsafe_allow_html=True)
+            proyecto = st.text_input("PROYECTO", placeholder="Nombre del proyecto", label_visibility="collapsed")
+            
+            st.markdown('<div class="field-label">TAREA</div>', unsafe_allow_html=True)
+            tarea = st.text_input("TAREA", placeholder="Descripción de la tarea", label_visibility="collapsed")
+            
+            st.markdown('<div class="field-label">MES</div>', unsafe_allow_html=True)
+            mes_t = st.text_input("MES", placeholder="Ej. Abril", label_visibility="collapsed")
+        
+        with c2:
+            st.markdown('<div class="field-label">ENCARGADO</div>', unsafe_allow_html=True)
+            encargado = st.text_input("ENCARGADO", placeholder="Persona a cargo", label_visibility="collapsed")
+            
+            st.markdown('<div class="field-label">FECHA REALIZADA</div>', unsafe_allow_html=True)
+            fecha_realizada = st.date_input("FECHA REALIZADA", format="YYYY-MM-DD", label_visibility="collapsed")
+            
+            st.markdown('<div class="field-label">FECHA META</div>', unsafe_allow_html=True)
+            fecha_meta = st.date_input("FECHA META", format="YYYY-MM-DD", label_visibility="collapsed")
+            
+            st.markdown('<div class="field-label">CANTIDAD</div>', unsafe_allow_html=True)
+            cantidad = st.number_input("CANTIDAD", min_value=0, step=1, value=0, label_visibility="collapsed")
+            
+            st.markdown('<div class="field-label">PRIORIDAD</div>', unsafe_allow_html=True)
+            prioridad = st.selectbox("PRIORIDAD", ["", "Alta", "Media", "Baja"], label_visibility="collapsed")
 
-st.markdown('<div class="form-shell">', unsafe_allow_html=True)
-st.markdown('<div class="form-heading">Formulario de Registro</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="form-copy">Los datos se guardarán en MySQL al presionar el botón de registro.</div>',
-    unsafe_allow_html=True,
-)
+        submit = st.form_submit_button("Guardar Registro en Sistema", use_container_width=True)
 
-with st.form("registro_trabajador_form"):
-    left, right = st.columns(2)
-
-    with left:
-        st.markdown('<div class="field-card"><div class="field-label">AÑO</div>', unsafe_allow_html=True)
-        anio = st.number_input("AÑO", min_value=2000, max_value=2100, value=2026, label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="field-card"><div class="field-label">EMPRESA</div>', unsafe_allow_html=True)
-        empresa = st.text_input("EMPRESA", placeholder="Nombre de la empresa", label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="field-card"><div class="field-label">PROYECTO</div>', unsafe_allow_html=True)
-        proyecto = st.text_input("PROYECTO", placeholder="Nombre del proyecto", label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="field-card"><div class="field-label">TAREA</div>', unsafe_allow_html=True)
-        tarea = st.text_input("TAREA", placeholder="Describe la tarea", label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="field-card"><div class="field-label">MES T</div>', unsafe_allow_html=True)
-        mes_t = st.text_input("MES T", placeholder="Ejemplo: Abril", label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with right:
-        st.markdown('<div class="field-card"><div class="field-label">ENCARGADO</div>', unsafe_allow_html=True)
-        encargado = st.text_input("ENCARGADO", placeholder="Nombre del encargado", label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="field-card"><div class="field-label">FECHA REALIZADA</div>', unsafe_allow_html=True)
-        fecha_realizada = st.date_input("FECHA REALIZADA", format="YYYY-MM-DD", label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="field-card"><div class="field-label">FECHA META</div>', unsafe_allow_html=True)
-        fecha_meta = st.date_input("FECHA META", format="YYYY-MM-DD", label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="field-card"><div class="field-label">CANTIDAD</div>', unsafe_allow_html=True)
-        cantidad = st.number_input("CANTIDAD", min_value=0, step=1, value=0, label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="field-card"><div class="field-label">PRIORIDAD</div>', unsafe_allow_html=True)
-        prioridad = st.selectbox("PRIORIDAD", ["", "Alta", "Media", "Baja"], label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    submit = st.form_submit_button("Guardar registro", use_container_width=True)
+st.markdown("</div>", unsafe_allow_html=True) # Cierre login-grid
+st.markdown("</div>", unsafe_allow_html=True) # Cierre login-shell
 
 if submit:
     obligatorios = [empresa, proyecto, tarea, mes_t, encargado, prioridad]

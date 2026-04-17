@@ -32,7 +32,7 @@ def login_responsable(correo: str, contrasena: str):
 
         password_guardado = usuario["password_hash"]
 
-        if contrasena == password_guardado or verify_password(contrasena, password_guardado):
+        if verify_password(contrasena, password_guardado):
             return {
                 "id": usuario["id"],
                 "nom_res": usuario["nom_res"],
@@ -47,71 +47,6 @@ def login_responsable(correo: str, contrasena: str):
             cursor.close()
         if conn is not None and conn.is_connected():
             conn.close()
-
-
-def login_page():
-    if "autenticado" not in st.session_state:
-        st.session_state.autenticado = False
-        st.session_state.usuario = None
-
-    st.markdown("""
-        <style>
-        [data-testid="stSidebar"],
-        [data-testid="stSidebarNav"],
-        [data-testid="stSidebarCollapsedControl"] {
-            display: none !important;
-        }
-        .login-container {
-            max-width: 400px;
-            margin: 50px auto;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.title("🔐 Dashboard de Proyectos")
-    st.write("---")
-    st.subheader("Inicia sesión en tu cuenta")
-
-    with st.form("login_form"):
-        correo = st.text_input(
-            "📧 Correo",
-            placeholder="Ingresa tu correo"
-        )
-        password = st.text_input(
-            "🔑 Contraseña",
-            type="password",
-            placeholder="Ingresa tu contraseña"
-        )
-        submit_login = st.form_submit_button("Iniciar Sesión", use_container_width=True)
-
-    if submit_login:
-        if not correo or not password:
-            st.error("⚠️ Por favor completa todos los campos")
-        else:
-            with st.spinner("Verificando credenciales..."):
-                usuario = login_responsable(correo, password)
-
-            if usuario:
-                st.session_state.autenticado = True
-                st.session_state.usuario = usuario
-                st.session_state.rol = usuario["rol"]
-                st.session_state.nombre = usuario["nom_res"]
-                st.success(f"✅ Bienvenido, {usuario['nom_res']}!")
-
-                if usuario["rol"] == "admin":
-                    st.switch_page("pages/admin_dashboard.py")
-                else:
-                    st.switch_page("pages/trabajador_registro_moderno.py")
-            else:
-                st.error("❌ Correo o contraseña incorrectos")
-
-    st.write("---")
-    st.info("Si no tienes cuenta, solicita acceso al administrador.")
-    st.markdown("""
-        <div style='text-align: center; color: #666;'>
-            <small>Proyecto Dashboard © 2026 | Sistema de Gestión de Tareas</small>
-        </div>
-    """, unsafe_allow_html=True)
 
 
 def login_page():
@@ -165,8 +100,8 @@ def login_page():
             align-items: stretch;
         }
         .login-hero {
-            min-height: 630px;
-            padding: 2.2rem 2rem;
+            height: 630px;
+            padding: 3rem 2.2rem;
             border-radius: 32px;
             background:
                 linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)),
@@ -214,7 +149,7 @@ def login_page():
             color: #f6e9d7;
         }
         .login-card {
-            min-height: 630px;
+            height: 630px;
             border-radius: 32px;
             padding: 1.4rem;
             background: rgba(255, 255, 255, 0.09);
@@ -286,6 +221,28 @@ def login_page():
             background: linear-gradient(135deg, #ffd18e 0%, #f0a84f 100%) !important;
             box-shadow: 0 18px 28px rgba(240, 168, 79, 0.28);
         }
+        [data-testid="stForm"] {
+            border: none !important;
+            background: transparent !important;
+            padding: 0 !important;
+            height: 630px;
+            border-radius: 32px !important;
+            padding: 1.4rem !important;
+            background: rgba(255, 255, 255, 0.09) !important;
+            border: 1px solid rgba(255,255,255,0.12) !important;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.34) !important;
+            backdrop-filter: blur(18px) !important;
+        }
+        [data-testid="stForm"] > div:first-child {
+            padding: 3rem 2.2rem !important;
+            background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05)) !important;
+            border: 1px solid rgba(255,255,255,0.08) !important;
+            border-radius: 24px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            height: 100% !important;
+        }
         div[data-testid="stAlert"] {
             border-radius: 18px !important;
         }
@@ -306,70 +263,67 @@ def login_page():
     st.markdown(css_login.replace("__FONDO_B64__", fondo_b64), unsafe_allow_html=True)
 
     st.markdown('<div class="login-shell">', unsafe_allow_html=True)
-    st.markdown(
-        """
-        <div class="login-grid">
-            <div class="login-hero">
-                <div class="login-badge">PLATAFORMA DE GESTIÓN</div>
-                <h1 class="login-title">Dashboard de Proyectos</h1>
-                <div class="login-copy">
-                    Accede a tu espacio de trabajo con una experiencia más elegante, enfocada en claridad, seguimiento y control operativo.
+    col_hero, col_card = st.columns([1.05, 0.95], gap="large")
+
+    with col_hero:
+        st.markdown(
+            """
+                <div class="login-hero">
+                    <div class="login-badge">PLATAFORMA DE GESTIÓN</div>
+                    <h1 class="login-title">Dashboard de Proyectos</h1>
+                    <div class="login-copy">
+                        Accede a tu espacio de trabajo con una experiencia más elegante, enfocada en claridad, seguimiento y control operativo.
+                    </div>
+                    <div class="login-points">
+                        <div class="login-point"><strong>Seguimiento centralizado</strong><br>Consulta tareas, fechas clave y responsables en un solo lugar.</div>
+                        <div class="login-point"><strong>Acceso por roles</strong><br>El sistema adapta la vista para administradores y trabajadores.</div>
+                        <div class="login-point"><strong>Diseño limpio</strong><br>Una interfaz más cuidada para trabajar con menos distracción.</div>
+                    </div>
                 </div>
-                <div class="login-points">
-                    <div class="login-point"><strong>Seguimiento centralizado</strong><br>Consulta tareas, fechas clave y responsables en un solo lugar.</div>
-                    <div class="login-point"><strong>Acceso por roles</strong><br>El sistema adapta la vista para administradores y trabajadores.</div>
-                    <div class="login-point"><strong>Diseño limpio</strong><br>Una interfaz más cuidada para trabajar con menos distracción.</div>
-                </div>
-            </div>
-            <div class="login-card">
-                <div class="login-card-inner">
-                    <div class="form-eyebrow">INICIAR SESIÓN</div>
-                    <div class="form-title">Bienvenido de nuevo</div>
-                    <div class="form-copy">Ingresa tus credenciales para continuar al panel del sistema.</div>
-        """,
-        unsafe_allow_html=True,
-    )
+                """,
+            unsafe_allow_html=True,
+        )
 
-    with st.form("login_form"):
-        correo = st.text_input("Correo", placeholder="Ingresa tu correo")
-        password = st.text_input("Contraseña", type="password", placeholder="Ingresa tu contraseña")
-        submit_login = st.form_submit_button("Iniciar Sesión", use_container_width=True)
+    with col_card:
+        with st.form("login_form"):
+            st.markdown(
+                """
+                <div class="form-eyebrow">INICIAR SESIÓN</div>
+                <div class="form-title">Bienvenido de nuevo</div>
+                <div class="form-copy">Ingresa tus credenciales para continuar al panel del sistema.</div>
+                """,
+                unsafe_allow_html=True
+            )
 
-    if submit_login:
-        if not correo or not password:
-            st.error("Completa todos los campos.")
-        else:
-            with st.spinner("Verificando credenciales..."):
-                usuario = login_responsable(correo, password)
-
-            if usuario:
-                st.session_state.autenticado = True
-                st.session_state.usuario = usuario
-                st.session_state.rol = usuario["rol"]
-                st.session_state.nombre = usuario["nom_res"]
-                st.success(f"Bienvenido, {usuario['nom_res']}.")
-
-                if usuario["rol"] == "admin":
-                    st.switch_page("pages/admin_dashboard.py")
-                else:
-                    st.switch_page("pages/trabajador_registro_moderno.py")
+            correo = st.text_input("Correo", placeholder="Ingresa tu correo", label_visibility="collapsed")
+            password = st.text_input("Contraseña", type="password", placeholder="Ingresa tu contraseña", label_visibility="collapsed")
+            submit_login = st.form_submit_button("Iniciar Sesión", use_container_width=True)
+            st.markdown(
+            """
+            <div class="helper-note">Si no tienes cuenta, solicita acceso al administrador del sistema.</div>
+            <div class="login-footer">Proyecto Dashboard © 2026 | Sistema de Gestión de Tareas</div>
+            """,
+            unsafe_allow_html=True
+        )
+        if submit_login:
+            if not correo or not password:
+                st.error("Completa todos los campos.")
             else:
-                st.error("Correo o contraseña incorrectos.")
+                with st.spinner("Verificando credenciales..."):
+                    usuario = login_responsable(correo, password)
 
-    st.markdown(
-        """
-            <div class="helper-note">
-                Si no tienes cuenta, solicita acceso al administrador del sistema.
-            </div>
-            <div class="login-footer">
-                Proyecto Dashboard © 2026 | Sistema de Gestión de Tareas
-            </div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+                if usuario:
+                    st.session_state.autenticado = True
+                    st.session_state.usuario = usuario
+                    st.session_state.rol = usuario["rol"]
+                    st.session_state.nombre = usuario["nom_res"]
+                    st.success(f"Bienvenido, {usuario['nom_res']}.")
+                    st.switch_page("pages/admin_dashboard.py" if usuario["rol"] == "admin" else "pages/trabajador_registro_moderno.py")
+                else:
+                    st.error("Correo o contraseña incorrectos.")
+
+        
+
     st.markdown("</div>", unsafe_allow_html=True)
 
 
