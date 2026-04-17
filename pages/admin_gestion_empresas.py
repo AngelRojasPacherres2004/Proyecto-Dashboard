@@ -283,7 +283,7 @@ with st.sidebar:
     st.markdown('<div class="logout-btn">', unsafe_allow_html=True)
     if st.button("→  cerrar sesión", key="logout"):
         st.session_state.clear()
-        st.switch_page("pages/login.py")
+        st.switch_page("login.py")
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ─── HEADER ──────────────────────────────────────────────────

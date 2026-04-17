@@ -6,7 +6,7 @@ from config.BD_Client import get_connection
 
 
 if not st.session_state.get("autenticado"):
-    st.switch_page("pages/login.py")
+    st.switch_page("login.py")
 
 
 def guardar_registro_trabajador(
@@ -186,27 +186,16 @@ st.markdown(css_registro.replace("__FONDO_B64__", fondo_b64), unsafe_allow_html=
 
 st.markdown('<div class="login-shell">', unsafe_allow_html=True)
 
-# Botones de navegación superiores
-col_nav1, col_nav2 = st.columns([4, 1])
-with col_nav1:
-    st.markdown('<div class="nav-button">', unsafe_allow_html=True)
-    if st.button("← Inicio"): st.switch_page("app.py")
-    st.markdown('</div>', unsafe_allow_html=True)
-with col_nav2:
-    st.markdown('<div class="nav-button">', unsafe_allow_html=True)
-    if st.button("Cerrar Sesión"):
-        st.session_state.clear()
-        st.switch_page("pages/login.py")
-    st.markdown('</div>', unsafe_allow_html=True)
-
 col_hero, col_form = st.columns([0.8, 1.2], gap="medium")
 
 with col_hero:
     st.markdown(
         f"""
-        <div class="hero-shell" style="display:none;"></div>
         <div class="login-hero">
             <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                    <div class="app-logo" style="margin:0;">SYSTEM_OS // WORKER</div>
+                </div>
                 <div class="login-badge">REGISTRO OPERATIVO</div>
                 <h1 class="login-title">Control de Avances</h1>
                 <p style="opacity:0.85; line-height:1.7;">Registra tus actividades diarias con precisión. Toda la información se sincroniza directamente con el panel de administración para seguimiento en tiempo real.</p>
@@ -225,6 +214,13 @@ with col_hero:
         """,
         unsafe_allow_html=True
     )
+    
+    # Botón de cierre de sesión optimizado
+    st.markdown('<div style="margin-top: 1rem;">', unsafe_allow_html=True)
+    if st.button("🚪 Cerrar Sesión", use_container_width=True, key="btn_logout"):
+        st.session_state.clear()
+        st.switch_page("login.py")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 with col_form:
     with st.form("registro_trabajador_form"):
