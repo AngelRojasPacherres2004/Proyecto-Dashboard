@@ -10,7 +10,7 @@ from utils.auth import verify_password
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-def login_responsable(correo: str, contrasena: str):
+def login_responsable(usuario_input: str, contrasena: str):
     conn = None
     cursor = None
     try:
@@ -18,25 +18,26 @@ def login_responsable(correo: str, contrasena: str):
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             """
-            SELECT id, nom_res, correo, password_hash, rol, estado, fecha_creacion
-            FROM responsables
-            WHERE correo = %s
+            SELECT id, nom_res, alias, usuario, password, rol, estado, fecha_creacion
+            FROM usuarios
+            WHERE usuario = %s
             LIMIT 1
             """,
-            (correo,),
+            (usuario_input,),
         )
         usuario = cursor.fetchone()
 
         if not usuario or usuario["estado"] != "activo":
             return None
 
-        password_guardado = usuario["password_hash"]
+        password_guardado = usuario["password"]
 
         if verify_password(contrasena, password_guardado):
             return {
                 "id": usuario["id"],
                 "nom_res": usuario["nom_res"],
-                "correo": usuario["correo"],
+                "alias": usuario["alias"],
+                "usuario": usuario["usuario"],
                 "rol": usuario["rol"],
                 "estado": usuario["estado"],
                 "fecha_creacion": usuario["fecha_creacion"],
@@ -295,7 +296,7 @@ def login_page():
                 unsafe_allow_html=True
             )
 
-            correo = st.text_input("Correo", placeholder="Ingresa tu correo", label_visibility="collapsed")
+            usuario_input = st.text_input("Usuario", placeholder="Ingresa tu usuario", label_visibility="collapsed")
             password = st.text_input("Contraseña", type="password", placeholder="Ingresa tu contraseña", label_visibility="collapsed")
             submit_login = st.form_submit_button("Iniciar Sesión", use_container_width=True)
             st.markdown(
@@ -306,11 +307,11 @@ def login_page():
             unsafe_allow_html=True
         )
         if submit_login:
-            if not correo or not password:
+            if not usuario_input or not password:
                 st.error("Completa todos los campos.")
             else:
                 with st.spinner("Verificando credenciales..."):
-                    usuario = login_responsable(correo, password)
+                    usuario = login_responsable(usuario_input, password)
 
                 if usuario:
                     st.session_state.autenticado = True
@@ -320,9 +321,7 @@ def login_page():
                     st.success(f"Bienvenido, {usuario['nom_res']}.")
                     st.switch_page("pages/admin_dashboard.py" if usuario["rol"] == "admin" else "pages/trabajador_registro_moderno.py")
                 else:
-                    st.error("Correo o contraseña incorrectos.")
-
-        
+                    st.error("Usuario o contraseña incorrectos.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
