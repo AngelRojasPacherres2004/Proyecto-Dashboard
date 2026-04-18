@@ -124,3 +124,113 @@ def get_login_style():
 
     </style>
     """
+def get_admin_style():
+    return """
+    <style>
+
+    /* ================= OCULTAR MENU STREAMLIT ================= */
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+
+    /* ================= BACKGROUND APP ================= */
+    .stApp {
+        background: linear-gradient(135deg, #1c1f2e 0%, #2a2f45 50%, #1f2a3a 100%);
+        color: white;
+        font-family: 'Inter', sans-serif;
+        animation: fadeInApp 0.6s ease-in-out;
+    }
+
+    /* ================= SIDEBAR ================= */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #2b2f3f 0%, #232838 100%);
+        backdrop-filter: blur(18px);
+        border-right: 1px solid rgba(255,255,255,0.08);
+        animation: slideInLeft 0.5s ease-out;
+    }
+
+    /* ================= TEXTO SIDEBAR ================= */
+    section[data-testid="stSidebar"] * {
+        color: white !important;
+    }
+
+    /* ================= TITULOS ================= */
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3 {
+        color: #f6c27d !important;
+        font-weight: 800;
+        animation: fadeInUp 0.6s ease;
+    }
+
+    /* ================= BOTONES ================= */
+    .stButton button {
+        width: 100%;
+        background: rgba(255,255,255,0.06) !important;
+        color: white !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        padding: 12px;
+        border-radius: 14px;
+        transition: all 0.25s ease;
+    }
+
+    .stButton button:hover {
+        background: rgba(246, 194, 125, 0.15) !important;
+        border-color: #f6c27d !important;
+        transform: translateX(6px) scale(1.02);
+        box-shadow: 0 6px 20px rgba(246, 194, 125, 0.15);
+    }
+
+    /* ================= MENU ACTIVO ================= */
+    .nav-link-selected {
+        background: rgba(246, 194, 125, 0.25) !important;
+        color: white !important;
+        border-left: 4px solid #f6c27d !important;
+        font-weight: 700 !important;
+        animation: glow 1.5s infinite alternate;
+    }
+
+    /* ================= OCULTAR FOOTER ================= */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+
+    /* ================= ANIMACIONES ================= */
+
+    @keyframes fadeInApp {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    @keyframes slideInLeft {
+        from {
+            transform: translateX(-20px);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes fadeInUp {
+        from {
+            transform: translateY(15px);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes glow {
+        from {
+            box-shadow: 0 0 5px rgba(246, 194, 125, 0.2);
+        }
+        to {
+            box-shadow: 0 0 18px rgba(246, 194, 125, 0.4);
+        }
+    }
+
+    </style>
+    """
