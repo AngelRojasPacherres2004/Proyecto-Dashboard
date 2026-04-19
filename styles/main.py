@@ -128,109 +128,145 @@ def get_admin_style():
     return """
     <style>
 
-    /* ================= OCULTAR MENU STREAMLIT ================= */
-    [data-testid="stSidebarNav"] {
-        display: none !important;
-    }
+    /* ================= OCULTAR ELEMENTOS STREAMLIT ================= */
+    [data-testid="stSidebarNav"] { display: none !important; }
+    #MainMenu                    { visibility: hidden; }
+    footer                       { visibility: hidden; }
+    [data-testid="stHeader"]     { background: #1c1f2e !important; }
 
-    /* ================= BACKGROUND APP ================= */
+    /* ================= APP BACKGROUND ================= */
     .stApp {
         background: linear-gradient(135deg, #1c1f2e 0%, #2a2f45 50%, #1f2a3a 100%);
         color: white;
         font-family: 'Inter', sans-serif;
-        animation: fadeInApp 0.6s ease-in-out;
     }
 
     /* ================= SIDEBAR ================= */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #2b2f3f 0%, #232838 100%);
-        backdrop-filter: blur(18px);
-        border-right: 1px solid rgba(255,255,255,0.08);
-        animation: slideInLeft 0.5s ease-out;
+    section[data-testid="stSidebar"] > div:first-child {
+        background: #1e2130 !important;
+        border-right: 1px solid rgba(255,255,255,0.07);
+        padding-top: 0 !important;
     }
 
-    /* ================= TEXTO SIDEBAR ================= */
-    section[data-testid="stSidebar"] * {
-        color: white !important;
+    /* ================= SIDEBAR HEADER ================= */
+    .sb-header {
+        padding: 24px 16px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.07);
+        margin-bottom: 12px;
     }
 
-    /* ================= TITULOS ================= */
-    section[data-testid="stSidebar"] h1,
-    section[data-testid="stSidebar"] h2,
-    section[data-testid="stSidebar"] h3 {
-        color: #f6c27d !important;
-        font-weight: 800;
-        animation: fadeInUp 0.6s ease;
+    .sb-logo {
+        font-size: 28px;
+        margin-bottom: 8px;
     }
 
-    /* ================= BOTONES ================= */
-    .stButton button {
-        width: 100%;
+    .sb-name {
+        color: #f6c27d;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+
+    .sb-role {
+        color: rgba(255,255,255,0.45);
+        font-size: 12px;
+        margin-top: 2px;
+    }
+
+    /* ================= SIDEBAR BOTONES ================= */
+    section[data-testid="stSidebar"] .stButton button {
+        background: transparent !important;
+        color: rgba(255,255,255,0.75) !important;
+        border: none !important;
+        border-radius: 10px !important;
+        text-align: left !important;
+        padding: 10px 14px !important;
+        font-size: 14px !important;
+        transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    section[data-testid="stSidebar"] .stButton button:hover {
         background: rgba(255,255,255,0.06) !important;
         color: white !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
-        padding: 12px;
-        border-radius: 14px;
-        transition: all 0.25s ease;
     }
 
-    .stButton button:hover {
-        background: rgba(246, 194, 125, 0.15) !important;
-        border-color: #f6c27d !important;
-        transform: translateX(6px) scale(1.02);
-        box-shadow: 0 6px 20px rgba(246, 194, 125, 0.15);
+    /* Botón activo (type="primary") */
+    section[data-testid="stSidebar"] .stButton button[kind="primary"] {
+        background: rgba(246,194,125,0.15) !important;
+        color: #f6c27d !important;
+        border-left: 3px solid #f6c27d !important;
+        border-radius: 0 10px 10px 0 !important;
+        font-weight: 600 !important;
     }
 
-    /* ================= MENU ACTIVO ================= */
-    .nav-link-selected {
-        background: rgba(246, 194, 125, 0.25) !important;
-        color: white !important;
-        border-left: 4px solid #f6c27d !important;
-        font-weight: 700 !important;
-        animation: glow 1.5s infinite alternate;
+    /* ================= METRIC CARDS ================= */
+    .metric-card {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 10px;
     }
 
-    /* ================= OCULTAR FOOTER ================= */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-
-    /* ================= ANIMACIONES ================= */
-
-    @keyframes fadeInApp {
-        from { opacity: 0; }
-        to { opacity: 1; }
+    .metric-label {
+        color: rgba(255,255,255,0.45);
+        font-size: 11px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        margin-bottom: 8px;
     }
 
-    @keyframes slideInLeft {
-        from {
-            transform: translateX(-20px);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
+    .metric-value {
+        color: white;
+        font-size: 26px;
+        font-weight: 800;
+        line-height: 1;
     }
 
-    @keyframes fadeInUp {
-        from {
-            transform: translateY(15px);
-            opacity: 0;
-        }
-        to {
-            transform: translateY(0);
-            opacity: 1;
-        }
+    /* ================= PAGE HEADER ================= */
+    .page-title {
+        color: white;
+        font-size: 26px;
+        font-weight: 800;
+        margin: 0 0 4px 0;
     }
 
-    @keyframes glow {
-        from {
-            box-shadow: 0 0 5px rgba(246, 194, 125, 0.2);
-        }
-        to {
-            box-shadow: 0 0 18px rgba(246, 194, 125, 0.4);
-        }
+    .page-subtitle {
+        color: rgba(255,255,255,0.5);
+        font-size: 14px;
+        margin: 0;
     }
+    /* ================= METRIC LABEL COLORES ================= */
+.metric-label--accent { color: #f6c27d; }
+.metric-label--green  { color: #5DCAA5; }
+.metric-label--red    { color: #F09595; }
+.metric-label--blue   { color: #85B7EB; }
 
+/* ================= SECTION HEADER ================= */
+.section-header {
+    margin: 32px 0 16px;
+}
+
+.section-header__top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+
+.section-header__icon { font-size: 20px; }
+
+.section-header__title {
+    color: #f6c27d;
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.section-header__subtitle {
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+    margin: 0 0 0 30px;
+}
     </style>
     """
