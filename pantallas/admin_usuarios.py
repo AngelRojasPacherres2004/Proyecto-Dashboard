@@ -165,11 +165,11 @@ def _form_usuario(prefill: dict = None, key_prefix: str = "nuevo"):
     with col2:
         alias = st.text_input("Alias", value=prefill.get("alias", "") if prefill else "", key=f"{key_prefix}_alias")
         rol   = st.selectbox("Rol", ["trabajador", "admin"],
-                             index=0 if not prefill else (0 if prefill.get("rol") == "trabajador" else 1),
-                             key=f"{key_prefix}_rol")
+                            index=0 if not prefill else (0 if prefill.get("rol") == "trabajador" else 1),
+                            key=f"{key_prefix}_rol")
         estado = st.selectbox("Estado", ["activo", "inactivo"],
-                              index=0 if not prefill else (0 if prefill.get("estado") == "activo" else 1),
-                              key=f"{key_prefix}_estado")
+                            index=0 if not prefill else (0 if prefill.get("estado") == "activo" else 1),
+                            key=f"{key_prefix}_estado")
 
     # Subárea — depende del área seleccionada
     subarea_id = None

@@ -1,8 +1,8 @@
 import streamlit as st
 from styles.main import get_admin_style
 from components.sidebar import admin_sidebar
-from pantallas.admin_usuarios import admin_usuarios  # ← agregar
-
+from pantallas.admin_usuarios import admin_usuarios 
+from pantallas.admin_empresas import admin_empresas
 
 def admin_home():
 
@@ -55,4 +55,7 @@ def admin_home():
             """, unsafe_allow_html=True)
 
     elif opcion == "Usuarios":
-        admin_usuarios()  # ← reemplaza todo el bloque anterior
+        admin_usuarios()  
+
+    elif opcion == "Empresas":
+        admin_empresas()  # ← agregar función para empresas 

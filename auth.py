@@ -27,7 +27,7 @@ def autenticar(usuario, password):
 # ----------------------------
 def login():
 
-    # 🔴 ocultar sidebar
+    
     st.markdown("""
         <style>
             section[data-testid="stSidebar"] {

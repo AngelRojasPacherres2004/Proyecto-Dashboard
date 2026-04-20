@@ -20,6 +20,7 @@ def admin_sidebar(user):
         opciones = {
             "Dashboard": "📊",
             "Usuarios":  "👥",
+            "Empresas":  "🏢",
         }
 
         if "menu_activo" not in st.session_state:
