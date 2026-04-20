@@ -3,6 +3,9 @@ from styles.main import get_admin_style
 from components.sidebar import admin_sidebar
 from pantallas.admin_usuarios import admin_usuarios 
 from pantallas.admin_empresas import admin_empresas
+from pantallas.admin_asignacion_tareas import admin_asignacion_tarea
+
+
 
 def admin_home():
 
@@ -59,3 +62,5 @@ def admin_home():
 
     elif opcion == "Empresas":
         admin_empresas()  # ← agregar función para empresas 
+    elif opcion == "Asignaciones":
+        admin_asignacion_tarea()

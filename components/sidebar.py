@@ -21,6 +21,7 @@ def admin_sidebar(user):
             "Dashboard": "📊",
             "Usuarios":  "👥",
             "Empresas":  "🏢",
+            "Asignaciones": "📋",
         }
 
         if "menu_activo" not in st.session_state:
