@@ -2,7 +2,6 @@ import streamlit as st
 from config.db import get_connection
 
 
-
 # ================================================================
 #  REPOSITORIO — solo habla con la BD
 # ================================================================
@@ -35,11 +34,13 @@ def _get_usuarios():
         SELECT u.id, u.nom_res, u.alias, u.usuario,
                u.rol, u.estado,
                a.nombre_area,
+               s.id        AS subarea_id,
                s.nombre_subarea,
+               s.area_id,
                u.fecha_creacion
         FROM usuarios u
-        LEFT JOIN areas    a ON u.area_id    = a.id
         LEFT JOIN subareas s ON u.subarea_id = s.id
+        LEFT JOIN areas    a ON s.area_id    = a.id
         ORDER BY u.id
     """)
     rows = cur.fetchall()
@@ -50,7 +51,12 @@ def _get_usuarios():
 def _get_usuario_by_id(uid: int):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM usuarios WHERE id = %s", (uid,))
+    cur.execute("""
+        SELECT u.*, s.area_id
+        FROM usuarios u
+        LEFT JOIN subareas s ON u.subarea_id = s.id
+        WHERE u.id = %s
+    """, (uid,))
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
@@ -60,12 +66,12 @@ def _crear_usuario(data: dict):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO usuarios (nom_res, alias, usuario, password, area_id, subarea_id, rol, estado)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO usuarios (nom_res, alias, usuario, password, subarea_id, rol, estado)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """, (
         data["nom_res"], data["alias"], data["usuario"],
         data["password"],
-        data["area_id"], data["subarea_id"],
+        data["subarea_id"],
         data["rol"], data["estado"]
     ))
     conn.commit()
@@ -79,23 +85,23 @@ def _actualizar_usuario(uid: int, data: dict):
         cur.execute("""
             UPDATE usuarios
             SET nom_res=%s, alias=%s, usuario=%s, password=%s,
-                area_id=%s, subarea_id=%s, rol=%s, estado=%s
+                subarea_id=%s, rol=%s, estado=%s
             WHERE id=%s
         """, (
             data["nom_res"], data["alias"], data["usuario"],
             data["nueva_password"],
-            data["area_id"], data["subarea_id"],
+            data["subarea_id"],
             data["rol"], data["estado"], uid
         ))
     else:
         cur.execute("""
             UPDATE usuarios
             SET nom_res=%s, alias=%s, usuario=%s,
-                area_id=%s, subarea_id=%s, rol=%s, estado=%s
+                subarea_id=%s, rol=%s, estado=%s
             WHERE id=%s
         """, (
             data["nom_res"], data["alias"], data["usuario"],
-            data["area_id"], data["subarea_id"],
+            data["subarea_id"],
             data["rol"], data["estado"], uid
         ))
     conn.commit()
@@ -131,45 +137,86 @@ def _usuario_existe(usuario: str, excluir_id: int = None):
 
 def _badge_rol(rol: str) -> str:
     color = "#f6c27d" if rol == "admin" else "#85B7EB"
-    return f'<span style="background:rgba(255,255,255,0.08);color:{color};padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;">{rol.upper()}</span>'
+    return (
+        f'<span style="background:rgba(255,255,255,0.08);color:{color};'
+        f'padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;">'
+        f'{rol.upper()}</span>'
+    )
 
 
 def _badge_estado(estado: str) -> str:
     if estado == "activo":
-        return '<span style="background:rgba(93,202,165,0.15);color:#5DCAA5;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;">ACTIVO</span>'
-    return '<span style="background:rgba(240,149,149,0.15);color:#F09595;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;">INACTIVO</span>'
+        return (
+            '<span style="background:rgba(93,202,165,0.15);color:#5DCAA5;'
+            'padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;">ACTIVO</span>'
+        )
+    return (
+        '<span style="background:rgba(240,149,149,0.15);color:#F09595;'
+        'padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;">INACTIVO</span>'
+    )
 
 
 def _form_usuario(prefill: dict = None, key_prefix: str = "nuevo"):
-    """Formulario reutilizable para crear y editar."""
+    """
+    Formulario reutilizable para crear y editar.
+    La tabla usuarios NO tiene area_id; el área se deduce a través de subareas.
+    Flujo: seleccionar Área → filtra Subáreas → guarda solo subarea_id.
+    """
     areas = _get_areas()
-    area_map  = {a["nombre_area"]: a["id"] for a in areas}
+    area_map   = {a["nombre_area"]: a["id"] for a in areas}
     area_names = list(area_map.keys())
 
-    # Valores por defecto si es edición
-    default_area_idx = 0
+    # Determinar área preseleccionada (viene de la JOIN en _get_usuario_by_id)
+    default_area_name = None
     if prefill and prefill.get("area_id"):
-        ids = [a["id"] for a in areas]
-        if prefill["area_id"] in ids:
-            default_area_idx = ids.index(prefill["area_id"])
+        for a in areas:
+            if a["id"] == prefill["area_id"]:
+                default_area_name = a["nombre_area"]
+                break
+
+    area_options = ["— Sin área —"] + area_names
+    default_area_idx = (
+        area_options.index(default_area_name)
+        if default_area_name and default_area_name in area_options
+        else 0
+    )
 
     col1, col2 = st.columns(2)
 
     with col1:
-        nom_res = st.text_input("Nombre completo", value=prefill.get("nom_res", "") if prefill else "", key=f"{key_prefix}_nom")
-        usuario = st.text_input("Usuario (login)", value=prefill.get("usuario", "") if prefill else "", key=f"{key_prefix}_usr")
-        area_sel = st.selectbox("Área", ["— Sin área —"] + area_names,
-                                index=default_area_idx + 1 if prefill and prefill.get("area_id") else 0,
-                                key=f"{key_prefix}_area")
+        nom_res = st.text_input(
+            "Nombre completo",
+            value=prefill.get("nom_res", "") if prefill else "",
+            key=f"{key_prefix}_nom"
+        )
+        usuario = st.text_input(
+            "Usuario (login)",
+            value=prefill.get("usuario", "") if prefill else "",
+            key=f"{key_prefix}_usr"
+        )
+        area_sel = st.selectbox(
+            "Área",
+            area_options,
+            index=default_area_idx,
+            key=f"{key_prefix}_area"
+        )
 
     with col2:
-        alias = st.text_input("Alias", value=prefill.get("alias", "") if prefill else "", key=f"{key_prefix}_alias")
-        rol   = st.selectbox("Rol", ["trabajador", "admin"],
-                            index=0 if not prefill else (0 if prefill.get("rol") == "trabajador" else 1),
-                            key=f"{key_prefix}_rol")
-        estado = st.selectbox("Estado", ["activo", "inactivo"],
-                            index=0 if not prefill else (0 if prefill.get("estado") == "activo" else 1),
-                            key=f"{key_prefix}_estado")
+        alias = st.text_input(
+            "Alias",
+            value=prefill.get("alias", "") if prefill else "",
+            key=f"{key_prefix}_alias"
+        )
+        rol = st.selectbox(
+            "Rol", ["trabajador", "admin"],
+            index=0 if not prefill else (0 if prefill.get("rol") == "trabajador" else 1),
+            key=f"{key_prefix}_rol"
+        )
+        estado = st.selectbox(
+            "Estado", ["activo", "inactivo"],
+            index=0 if not prefill else (0 if prefill.get("estado") == "activo" else 1),
+            key=f"{key_prefix}_estado"
+        )
 
     # Subárea — depende del área seleccionada
     subarea_id = None
@@ -177,28 +224,40 @@ def _form_usuario(prefill: dict = None, key_prefix: str = "nuevo"):
         area_id_sel = area_map[area_sel]
         subareas = _get_subareas(area_id_sel)
         if subareas:
-            sub_map = {s["nombre_subarea"]: s["id"] for s in subareas}
+            sub_map   = {s["nombre_subarea"]: s["id"] for s in subareas}
             sub_names = list(sub_map.keys())
-            default_sub = 0
+
+            # Preseleccionar subárea si estamos editando
+            default_sub_idx = 0
             if prefill and prefill.get("subarea_id"):
                 sub_ids = [s["id"] for s in subareas]
                 if prefill["subarea_id"] in sub_ids:
-                    default_sub = sub_ids.index(prefill["subarea_id"])
-            sub_sel = st.selectbox("Subárea", ["— Sin subárea —"] + sub_names,
-                                   index=default_sub + 1 if prefill and prefill.get("subarea_id") else 0,
-                                   key=f"{key_prefix}_sub")
+                    default_sub_idx = sub_ids.index(prefill["subarea_id"]) + 1  # +1 por "— Sin subárea —"
+
+            sub_options = ["— Sin subárea —"] + sub_names
+            sub_sel = st.selectbox(
+                "Subárea",
+                sub_options,
+                index=default_sub_idx,
+                key=f"{key_prefix}_sub"
+            )
             if sub_sel != "— Sin subárea —":
                 subarea_id = sub_map[sub_sel]
-        area_id = area_id_sel
+        else:
+            st.caption("Esta área no tiene subáreas registradas.")
     else:
-        area_id = None
+        st.empty()  # Mantiene el layout consistente
 
     # Contraseña
     if prefill:
-        nueva_pw = st.text_input("Nueva contraseña (dejar vacío para no cambiar)",
-                                 type="password", key=f"{key_prefix}_pw")
+        nueva_pw = st.text_input(
+            "Nueva contraseña (dejar vacío para no cambiar)",
+            type="password", key=f"{key_prefix}_pw"
+        )
     else:
-        nueva_pw = st.text_input("Contraseña *", type="password", key=f"{key_prefix}_pw")
+        nueva_pw = st.text_input(
+            "Contraseña *", type="password", key=f"{key_prefix}_pw"
+        )
 
     return {
         "nom_res":        nom_res.strip(),
@@ -206,8 +265,7 @@ def _form_usuario(prefill: dict = None, key_prefix: str = "nuevo"):
         "usuario":        usuario.strip(),
         "nueva_password": nueva_pw,
         "password":       nueva_pw,
-        "area_id":        area_id,
-        "subarea_id":     subarea_id,
+        "subarea_id":     subarea_id,   # ← único campo que va a la BD
         "rol":            rol,
         "estado":         estado,
     }
@@ -242,9 +300,11 @@ def admin_usuarios():
     # ── Barra superior ───────────────────────────────────────────
     col_busq, col_btn = st.columns([3, 1])
     with col_busq:
-        busqueda = st.text_input("🔍 Buscar por nombre, alias o usuario",
-                                 placeholder="Escribe para filtrar...",
-                                 label_visibility="collapsed")
+        busqueda = st.text_input(
+            "🔍 Buscar por nombre, alias o usuario",
+            placeholder="Escribe para filtrar...",
+            label_visibility="collapsed"
+        )
     with col_btn:
         if st.button("➕ Nuevo usuario", use_container_width=True):
             st.session_state.modo_crud  = "crear"
@@ -314,31 +374,24 @@ def admin_usuarios():
     # Cabecera tabla
     with st.container(border=False):
         col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1, 1.5, 1, 1, 0.8])
-        with col1:
-            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>NOMBRE / ALIAS</span>", unsafe_allow_html=True)
-        with col2:
-            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>USUARIO</span>", unsafe_allow_html=True)
-        with col3:
-            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ÁREA · SUBÁREA</span>", unsafe_allow_html=True)
-        with col4:
-            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ROL</span>", unsafe_allow_html=True)
-        with col5:
-            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ESTADO</span>", unsafe_allow_html=True)
-        with col6:
-            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ACCIONES</span>", unsafe_allow_html=True)
+        headers = ["NOMBRE / ALIAS", "USUARIO", "ÁREA · SUBÁREA", "ROL", "ESTADO", "ACCIONES"]
+        for col, header in zip([col1, col2, col3, col4, col5, col6], headers):
+            with col:
+                st.markdown(
+                    f"<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>{header}</span>",
+                    unsafe_allow_html=True
+                )
 
     st.divider()
 
     for u in usuarios:
         area_info = u.get("nombre_area") or "—"
         sub_info  = u.get("nombre_subarea") or ""
-        area_str  = f"{area_info}" + (f" · {sub_info}" if sub_info else "")
+        area_str  = area_info + (f" · {sub_info}" if sub_info else "")
 
-        # Usar contenedor para cada fila (estilo admin_empresas)
         with st.container(border=True):
             col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1, 1.5, 1, 1, 0.8])
-            
-            # Columna 1: Nombre / Alias
+
             with col1:
                 st.markdown(f"""
                 <div>
@@ -346,24 +399,19 @@ def admin_usuarios():
                     <br><span style="color:rgba(255,255,255,0.35);font-size:11px;">{u['alias']}</span>
                 </div>
                 """, unsafe_allow_html=True)
-            
-            # Columna 2: Usuario
+
             with col2:
                 st.caption(u['usuario'])
-                
-            # Columna 3: Área · Subárea
+
             with col3:
                 st.caption(area_str)
-                
-            # Columna 4: Rol
+
             with col4:
                 st.markdown(_badge_rol(u['rol']), unsafe_allow_html=True)
-                
-            # Columna 5: Estado
+
             with col5:
                 st.markdown(_badge_estado(u['estado']), unsafe_allow_html=True)
-            
-            # Columna 6: Acciones
+
             with col6:
                 bc1, bc2 = st.columns(2, gap="small")
                 with bc1:
@@ -427,7 +475,7 @@ def admin_usuarios():
                              key=f"confirm_del_{u['id']}", type="primary"):
                     try:
                         _eliminar_usuario(u["id"])
-                        st.session_state.crud_msg     = ("ok", f"✅ Usuario eliminado.")
+                        st.session_state.crud_msg     = ("ok", "✅ Usuario eliminado.")
                         st.session_state.uid_eliminar = None
                     except Exception as e:
                         st.session_state.crud_msg = ("error", f"No se puede eliminar: {e}")
