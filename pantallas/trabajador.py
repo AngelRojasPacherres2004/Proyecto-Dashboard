@@ -2,13 +2,39 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from components.ui import page_header, section_header, metric_card
-from styles.main import get_global_style
+from styles.main import get_admin_style
 
 def trabajador_home():
     # ================= ESTILO =================
-    st.markdown(get_global_style(), unsafe_allow_html=True)
+    st.markdown(get_admin_style(), unsafe_allow_html=True)
 
     user = st.session_state.get("user", {})
+
+    # ================= SIDEBAR (ACCIONES RÁPIDAS) =================
+    with st.sidebar:
+        st.markdown(f"""
+            <div class="sb-header">
+                <div class="sb-logo">👷‍♂️</div>
+                <div class="sb-name">Acciones Rápidas</div>
+                <div class="sb-role">Funciones comunes</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        if st.button("📝 Nueva Tarea", use_container_width=True, key="sb_task"):
+            st.info("Funcionalidad próximamente")
+
+        if st.button("📊 Ver Reportes", use_container_width=True, key="sb_reports"):
+            st.info("Funcionalidad próximamente")
+
+        if st.button("👤 Mi Perfil", use_container_width=True, key="sb_profile"):
+            st.info("Funcionalidad próximamente")
+
+        st.markdown('<div style="height: 40px;"></div>', unsafe_allow_html=True)
+        
+        if st.button("🚪 Cerrar Sesión", use_container_width=True, key="sb_logout", type="primary"):
+            st.session_state.clear()
+            st.rerun()
+
 
     # ================= HEADER =================
     page_header("Panel de Trabajador", f"Bienvenido, {user.get('alias', 'Trabajador')}")
@@ -131,26 +157,3 @@ def trabajador_home():
             <span style="color: rgba(255,255,255,0.5); font-size: 12px;">{actividad['hora']}</span>
         </div>
         """, unsafe_allow_html=True)
-
-    # ================= ACCIONES RÁPIDAS =================
-    st.markdown("---")
-    section_header("Acciones Rápidas", "Funciones comunes", "⚡")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        if st.button("📝 Nueva Tarea", use_container_width=True):
-            st.info("Funcionalidad próximamente")
-
-    with col2:
-        if st.button("📊 Ver Reportes", use_container_width=True):
-            st.info("Funcionalidad próximamente")
-
-    with col3:
-        if st.button("👤 Mi Perfil", use_container_width=True):
-            st.info("Funcionalidad próximamente")
-
-    with col4:
-        if st.button("🚪 Cerrar Sesión", use_container_width=True):
-            st.session_state.clear()
-            st.rerun()

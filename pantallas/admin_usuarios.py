@@ -312,56 +312,69 @@ def admin_usuarios():
         return
 
     # Cabecera tabla
-    st.markdown("""
-    <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 120px;
-                gap:8px;padding:8px 16px;
-                color:rgba(255,255,255,0.4);font-size:11px;
-                letter-spacing:1px;text-transform:uppercase;
-                border-bottom:1px solid rgba(255,255,255,0.07);margin-bottom:4px;">
-        <span>Nombre / Alias</span>
-        <span>Usuario</span>
-        <span>Área · Subárea</span>
-        <span>Rol</span>
-        <span>Estado</span>
-        <span></span>
-    </div>
-    """, unsafe_allow_html=True)
+    with st.container(border=False):
+        col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1, 1.5, 1, 1, 0.8])
+        with col1:
+            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>NOMBRE / ALIAS</span>", unsafe_allow_html=True)
+        with col2:
+            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>USUARIO</span>", unsafe_allow_html=True)
+        with col3:
+            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ÁREA · SUBÁREA</span>", unsafe_allow_html=True)
+        with col4:
+            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ROL</span>", unsafe_allow_html=True)
+        with col5:
+            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ESTADO</span>", unsafe_allow_html=True)
+        with col6:
+            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ACCIONES</span>", unsafe_allow_html=True)
+
+    st.divider()
 
     for u in usuarios:
         area_info = u.get("nombre_area") or "—"
         sub_info  = u.get("nombre_subarea") or ""
         area_str  = f"{area_info}" + (f" · {sub_info}" if sub_info else "")
 
-        st.markdown(f"""
-        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 120px;
-                    gap:8px;align-items:center;padding:12px 16px;
-                    background:rgba(255,255,255,0.03);border-radius:12px;
-                    border:1px solid rgba(255,255,255,0.05);margin-bottom:6px;">
-            <div>
-                <span style="color:white;font-weight:600;">{u['nom_res']}</span>
-                <span style="color:rgba(255,255,255,0.4);font-size:12px;margin-left:8px;">{u['alias']}</span>
-            </div>
-            <span style="color:rgba(255,255,255,0.7);font-size:13px;">{u['usuario']}</span>
-            <span style="color:rgba(255,255,255,0.55);font-size:12px;">{area_str}</span>
-            <span>{_badge_rol(u['rol'])}</span>
-            <span>{_badge_estado(u['estado'])}</span>
-            <span></span>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Botones acción en columna aparte (Streamlit no permite botones dentro de markdown)
-        _, _, _, _, _, col_acc = st.columns([2, 1, 1, 1, 1, 1.2])
-        with col_acc:
-            bc1, bc2 = st.columns(2)
-            with bc1:
-                if st.button("✏️", key=f"edit_{u['id']}", help="Editar"):
-                    st.session_state.modo_crud  = "editar"
-                    st.session_state.uid_editar = u["id"]
-                    st.rerun()
-            with bc2:
-                if st.button("🗑️", key=f"del_{u['id']}", help="Eliminar"):
-                    st.session_state.uid_eliminar = u["id"]
-                    st.rerun()
+        # Usar contenedor para cada fila (estilo admin_empresas)
+        with st.container(border=True):
+            col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1, 1.5, 1, 1, 0.8])
+            
+            # Columna 1: Nombre / Alias
+            with col1:
+                st.markdown(f"""
+                <div>
+                    <span style="color:white;font-weight:600;font-size:14px;">{u['nom_res']}</span>
+                    <br><span style="color:rgba(255,255,255,0.35);font-size:11px;">{u['alias']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Columna 2: Usuario
+            with col2:
+                st.caption(u['usuario'])
+                
+            # Columna 3: Área · Subárea
+            with col3:
+                st.caption(area_str)
+                
+            # Columna 4: Rol
+            with col4:
+                st.markdown(_badge_rol(u['rol']), unsafe_allow_html=True)
+                
+            # Columna 5: Estado
+            with col5:
+                st.markdown(_badge_estado(u['estado']), unsafe_allow_html=True)
+            
+            # Columna 6: Acciones
+            with col6:
+                bc1, bc2 = st.columns(2, gap="small")
+                with bc1:
+                    if st.button("🖍", key=f"edit_{u['id']}", help="Editar", use_container_width=True):
+                        st.session_state.modo_crud  = "editar"
+                        st.session_state.uid_editar = u["id"]
+                        st.rerun()
+                with bc2:
+                    if st.button("🗑️", key=f"del_{u['id']}", help="Eliminar", use_container_width=True):
+                        st.session_state.uid_eliminar = u["id"]
+                        st.rerun()
 
         # ── Formulario editar (inline bajo la fila) ──────────────
         if st.session_state.modo_crud == "editar" and st.session_state.uid_editar == u["id"]:

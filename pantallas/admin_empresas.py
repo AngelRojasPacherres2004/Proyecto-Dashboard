@@ -373,7 +373,7 @@ def admin_empresas():
             with col6:
                 col_edit, col_del = st.columns(2, gap="small")
                 with col_edit:
-                    if st.button("✏️", key=f"edit_emp_{e['id']}", help="Editar", use_container_width=True):
+                    if st.button("🖍", key=f"edit_emp_{e['id']}", help="Editar", use_container_width=True):
                         st.session_state.emp_modo      = "editar"
                         st.session_state.emp_id_editar = e["id"]
                         st.rerun()
