@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from components.ui import page_header, section_header, metric_card
+from components.sidebar import trabajador_sidebar
 from styles.main import get_admin_style
 
 def trabajador_home():
@@ -11,30 +12,7 @@ def trabajador_home():
     user = st.session_state.get("user", {})
 
     # ================= SIDEBAR (ACCIONES RÁPIDAS) =================
-    with st.sidebar:
-        st.markdown(f"""
-            <div class="sb-header">
-                <div class="sb-logo">👷‍♂️</div>
-                <div class="sb-name">Acciones Rápidas</div>
-                <div class="sb-role">Funciones comunes</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        if st.button("📝 Nueva Tarea", use_container_width=True, key="sb_task"):
-            st.info("Funcionalidad próximamente")
-
-        if st.button("📊 Ver Reportes", use_container_width=True, key="sb_reports"):
-            st.info("Funcionalidad próximamente")
-
-        if st.button("👤 Mi Perfil", use_container_width=True, key="sb_profile"):
-            st.info("Funcionalidad próximamente")
-
-        st.markdown('<div style="height: 40px;"></div>', unsafe_allow_html=True)
-        
-        if st.button("🚪 Cerrar Sesión", use_container_width=True, key="sb_logout", type="primary"):
-            st.session_state.clear()
-            st.rerun()
-
+    trabajador_sidebar(user)
 
     # ================= HEADER =================
     page_header("Panel de Trabajador", f"Bienvenido, {user.get('alias', 'Trabajador')}")
