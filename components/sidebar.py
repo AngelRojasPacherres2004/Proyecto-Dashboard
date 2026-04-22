@@ -50,6 +50,9 @@ def admin_sidebar(user):
 
 def trabajador_sidebar(user):
     """Muestra el sidebar con acciones rápidas para el rol de trabajador."""
+    if "trabajador_menu" not in st.session_state:
+        st.session_state.trabajador_menu = "Reportes"
+
     with st.sidebar:
         st.markdown(f"""
             <div class="sb-header">
@@ -59,17 +62,24 @@ def trabajador_sidebar(user):
             </div>
         """, unsafe_allow_html=True)
 
-        if st.button("📝 Nueva Tarea", use_container_width=True, key="sb_task"):
-            st.info("Funcionalidad próximamente")
+        # Navegación
+        if st.button("📊 Ver Reportes", use_container_width=True, key="sb_reports", 
+                     type="primary" if st.session_state.trabajador_menu == "Reportes" else "secondary"):
+            st.session_state.trabajador_menu = "Reportes"
+            st.rerun()
 
-        if st.button("📊 Ver Reportes", use_container_width=True, key="sb_reports"):
-            st.info("Funcionalidad próximamente")
+        if st.button("📝 Nueva Tarea", use_container_width=True, key="sb_task",
+                     type="primary" if st.session_state.trabajador_menu == "Registro" else "secondary"):
+            st.session_state.trabajador_menu = "Registro"
+            st.rerun()
 
         if st.button("👤 Mi Perfil", use_container_width=True, key="sb_profile"):
             st.info("Funcionalidad próximamente")
 
-        st.markdown('<div style="height: 40px;"></div>', unsafe_allow_html=True)
+        st.markdown('---')
 
         if st.button("🚪 Cerrar Sesión", use_container_width=True, key="sb_logout", type="primary"):
             st.session_state.clear()
             st.rerun()
+
+    return st.session_state.trabajador_menu
