@@ -134,7 +134,7 @@ def _form_empresa(prefill: dict = None, key_prefix: str = "new"):
             return prefill[campo]
         return default
 
-    tab1, tab2, tab3 = st.tabs(["📋 Datos generales", "🏦 Credenciales SUNAT / AFP / BN", "📬 Contacto y otros"])
+    tab1, tab2, tab3 = st.tabs([" Datos generales", " Credenciales SUNAT / AFP / BN", " Contacto y otros"])
 
     # ── Tab 1: Datos generales ────────────────────────────────────
     with tab1:
@@ -319,7 +319,7 @@ def admin_empresas():
         return
 
     # Mostrar tabla de empresas
-    st.markdown("### 📋 Lista de Empresas")
+    st.markdown("###  Lista de Empresas")
     
     # Encabezado de la tabla
     with st.container(border=False):
