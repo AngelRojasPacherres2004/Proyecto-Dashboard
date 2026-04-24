@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from components.ui import page_header, section_header, metric_card
 from components.sidebar import trabajador_sidebar
 from styles.main import get_admin_style
+from pantallas.trabajador_perfil import trabajador_perfil
+from pantallas.trabajador_tareas import vista_detalle_tarea, render_nueva_tarea_placeholder
 
 def trabajador_home():
     # ================= ESTILO =================
@@ -14,6 +16,25 @@ def trabajador_home():
     # ================= SIDEBAR (ACCIONES RÁPIDAS) =================
     trabajador_sidebar(user)
 
+    # ================= ROUTING =================
+    opcion = st.session_state.get("menu_trabajador", "Inicio")
+
+    if opcion == "Perfil":
+        trabajador_perfil()
+    elif opcion == "Nueva Tarea":
+        render_nueva_tarea_placeholder()
+    else:
+        # Manejo interno de sub-vistas (Lista o Detalle)
+        if "vista_actual" not in st.session_state:
+            st.session_state.vista_actual = "listado"
+        
+        if st.session_state.vista_actual == "detalle":
+            vista_detalle_tarea(st.session_state.tarea_seleccionada_id)
+        else:
+            render_trabajador_dashboard(user)
+
+def render_trabajador_dashboard(user):
+    """Contenido principal del panel de trabajador."""
     # ================= HEADER =================
     page_header("Panel de Trabajador", f"Bienvenido, {user.get('alias', 'Trabajador')}")
 
@@ -88,22 +109,16 @@ def trabajador_home():
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px;">
-                    <button style="
-                        background: rgba(246, 194, 125, 0.1);
-                        border: 1px solid #f6c27d;
-                        color: #ffd18e;
-                        padding: 6px 12px;
-                        border-radius: 8px;
-                        cursor: pointer;
-                        font-size: 12px;
-                        transition: all 0.2s;
-                    " onmouseover="this.style.background='rgba(246, 194, 125, 0.2)'" onmouseout="this.style.background='rgba(246, 194, 125, 0.1)'">
-                        Ver detalles
-                    </button>
                 </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+        # Botón funcional de Streamlit para "Ver detalles"
+        if st.button(f"🔎 Ver detalles: {tarea['titulo']}", key=f"btn_det_{tarea['titulo']}"):
+            st.session_state.tarea_seleccionada_id = 1 # Aquí usarías el ID real de la BD
+            st.session_state.vista_actual = "detalle"
+            st.rerun()
 
     st.markdown("---")
 

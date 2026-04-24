@@ -59,13 +59,27 @@ def trabajador_sidebar(user):
             </div>
         """, unsafe_allow_html=True)
 
-        if st.button("📝 Nueva Tarea", use_container_width=True, key="sb_task"):
-            st.info("Funcionalidad próximamente")
+        if "menu_trabajador" not in st.session_state:
+            st.session_state.menu_trabajador = "Inicio"
+
+        if st.button("🏠 Dashboard", use_container_width=True, key="sb_home", 
+                     type="primary" if st.session_state.menu_trabajador == "Inicio" else "secondary"):
+            st.session_state.menu_trabajador = "Inicio"
+            st.rerun()
+
+        if st.button("👤 Mi Perfil", use_container_width=True, key="sb_profile",
+                     type="primary" if st.session_state.menu_trabajador == "Perfil" else "secondary"):
+            st.session_state.menu_trabajador = "Perfil"
+            st.rerun()
+
+        st.markdown("---")
+
+        if st.button("📝 Nueva Tarea", use_container_width=True, key="sb_task",
+                     type="primary" if st.session_state.menu_trabajador == "Nueva Tarea" else "secondary"):
+            st.session_state.menu_trabajador = "Nueva Tarea"
+            st.rerun()
 
         if st.button("📊 Ver Reportes", use_container_width=True, key="sb_reports"):
-            st.info("Funcionalidad próximamente")
-
-        if st.button("👤 Mi Perfil", use_container_width=True, key="sb_profile"):
             st.info("Funcionalidad próximamente")
 
         st.markdown('<div style="height: 40px;"></div>', unsafe_allow_html=True)
