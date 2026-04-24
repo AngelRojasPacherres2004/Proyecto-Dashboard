@@ -5,7 +5,7 @@ from components.ui import page_header, section_header, metric_card
 from components.sidebar import trabajador_sidebar
 from styles.main import get_admin_style
 from pantallas.trabajador_perfil import trabajador_perfil
-from pantallas.trabajador_tareas import vista_detalle_tarea, render_nueva_tarea_placeholder
+from pantallas.trabajador_tareas import vista_detalle_tarea, render_nueva_tarea_placeholder, get_tareas_pendientes_usuario
 
 def trabajador_home():
     # ================= ESTILO =================
@@ -60,31 +60,17 @@ def render_trabajador_dashboard(user):
     # ================= TAREAS PENDIENTES =================
     section_header("Tareas Pendientes", "Actividades que requieren tu atención", "📋")
 
-    # Tareas de ejemplo
-    tareas_pendientes = [
-        {
-            "titulo": "Revisar documentación del proyecto Alpha",
-            "prioridad": "Alta",
-            "fecha_limite": (datetime.now() + timedelta(days=2)).strftime("%d/%m/%Y"),
-            "estado": "En progreso"
-        },
-        {
-            "titulo": "Actualizar base de datos de clientes",
-            "prioridad": "Media",
-            "fecha_limite": (datetime.now() + timedelta(days=5)).strftime("%d/%m/%Y"),
-            "estado": "Pendiente"
-        },
-        {
-            "titulo": "Preparar reporte mensual",
-            "prioridad": "Baja",
-            "fecha_limite": (datetime.now() + timedelta(days=10)).strftime("%d/%m/%Y"),
-            "estado": "Pendiente"
-        }
-    ]
+    # Obtener tareas reales de la base de datos
+    tareas_pendientes = get_tareas_pendientes_usuario(user.get("id"))
+
+    if not tareas_pendientes:
+        st.info("No tienes tareas pendientes asignadas.")
 
     for tarea in tareas_pendientes:
-        prioridad_color = {"Alta": "#ff6b6b", "Media": "#ffd93d", "Baja": "#6bcf7f"}.get(tarea["prioridad"], "#6bcf7f")
+        # Como la prioridad no está en la base de datos aún, usaremos un color por defecto o lógica de fecha
+        prioridad_color = "#f6c27d" # Color dorado institucional
         estado_icono = {"Pendiente": "⏳", "En progreso": "🔄", "Completada": "✅"}.get(tarea["estado"], "⏳")
+        fecha_fmt = tarea['fecha_limite'].strftime("%d/%m/%Y") if hasattr(tarea['fecha_limite'], 'strftime') else tarea['fecha_limite']
 
         st.markdown(f"""
         <div style="
@@ -103,8 +89,8 @@ def render_trabajador_dashboard(user):
                         <h4 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">{tarea['titulo']}</h4>
                     </div>
                     <div style="display: flex; gap: 16px; font-size: 14px;">
-                        <span style="color: {prioridad_color};">🔥 {tarea['prioridad']}</span>
-                        <span style="color: rgba(255,255,255,0.7);">📅 {tarea['fecha_limite']}</span>
+                        <span style="color: {prioridad_color};">🔥 Prioridad</span>
+                        <span style="color: rgba(255,255,255,0.7);">📅 {fecha_fmt}</span>
                         <span style="color: rgba(255,255,255,0.7);">{tarea['estado']}</span>
                     </div>
                 </div>
@@ -115,8 +101,8 @@ def render_trabajador_dashboard(user):
         """, unsafe_allow_html=True)
 
         # Botón funcional de Streamlit para "Ver detalles"
-        if st.button(f"🔎 Ver detalles: {tarea['titulo']}", key=f"btn_det_{tarea['titulo']}"):
-            st.session_state.tarea_seleccionada_id = 1 # Aquí usarías el ID real de la BD
+        if st.button(f"🔎 Ver detalles: {tarea['titulo']}", key=f"btn_det_{tarea['id']}"):
+            st.session_state.tarea_seleccionada_id = tarea['id']
             st.session_state.vista_actual = "detalle"
             st.rerun()
 

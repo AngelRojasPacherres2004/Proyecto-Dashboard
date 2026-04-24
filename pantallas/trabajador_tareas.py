@@ -2,6 +2,25 @@ import streamlit as st
 from config.db import get_connection
 from datetime import datetime
 
+def get_tareas_pendientes_usuario(usuario_id):
+    """Obtiene las tareas asignadas a un usuario que no han sido completadas."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT 
+            a.id, 
+            t.nombre_tarea as titulo, 
+            a.fecha_meta as fecha_limite, 
+            a.estado
+        FROM asignaciones a
+        JOIN tareas t ON a.tarea_id = t.id
+        WHERE a.usuario_id = %s AND a.estado != 'completada'
+        ORDER BY a.fecha_meta ASC
+    """, (usuario_id,))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
 def _get_detalle_asignacion(asignacion_id):
     """Obtiene toda la información relacionada a una tarea específica."""
     conn = get_connection()

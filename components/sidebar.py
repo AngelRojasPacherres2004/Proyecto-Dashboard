@@ -74,13 +74,7 @@ def trabajador_sidebar(user):
 
         st.markdown("---")
 
-        if st.button("📝 Nueva Tarea", use_container_width=True, key="sb_task",
-                     type="primary" if st.session_state.menu_trabajador == "Nueva Tarea" else "secondary"):
-            st.session_state.menu_trabajador = "Nueva Tarea"
-            st.rerun()
-
-        if st.button("📊 Ver Reportes", use_container_width=True, key="sb_reports"):
-            st.info("Funcionalidad próximamente")
+        
 
         st.markdown('<div style="height: 40px;"></div>', unsafe_allow_html=True)
 
