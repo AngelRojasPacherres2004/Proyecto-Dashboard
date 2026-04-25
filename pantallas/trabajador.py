@@ -50,15 +50,21 @@ def render_trabajador_dashboard(user):
     for tarea in tareas_pendientes:
         # Como la prioridad no está en la base de datos aún, usaremos un color por defecto o lógica de fecha
         prioridad_color = "#f6c27d" # Color dorado institucional
-        estado_icono = {"Pendiente": "⏳", "En progreso": "🔄", "Completada": "✅"}.get(tarea["estado"], "⏳")
+        estado_icono = {"pendiente": "⏳", "en progreso": "🔄", "completada": "✅"}.get(tarea["estado"].lower(), "⏳")
         fecha_fmt = tarea['fecha_limite'].strftime("%d/%m/%Y") if hasattr(tarea['fecha_limite'], 'strftime') else tarea['fecha_limite']
-
+        
+        # Lógica de alerta de fecha
+        hoy = datetime.now().date()
+        vencida = tarea['fecha_limite'] < hoy if hasattr(tarea['fecha_limite'], 'date') else False
+        fecha_color = "#F09595" if vencida else "rgba(255,255,255,0.6)"
+        
         st.markdown(f"""
         <div style="
             background: rgba(255,255,255,0.03);
             padding: 16px;
             border-radius: 12px;
             border-left: 4px solid {prioridad_color};
+            border-right: 1px solid rgba(255,255,255,0.05);
             margin-bottom: 12px;
             transition: all 0.3s ease;
         " onmouseover="this.style.transform='translateX(4px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)'"
@@ -69,8 +75,12 @@ def render_trabajador_dashboard(user):
                         <span style="font-size: 16px; margin-right: 8px;">{estado_icono}</span>
                         <h4 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">{tarea['titulo']}</h4>
                     </div>
-                    <div style="display: flex; gap: 16px; font-size: 14px;">
-                        <span style="color: rgba(255,255,255,0.7);">{tarea['estado']}</span>
+                    <div style="display: flex; gap: 16px; font-size: 13px; margin-top: 6px; margin-left: 24px;">
+                        <span style="color: #85B7EB; font-weight: 500;">🏢 {tarea['empresa']}</span>
+                        <span style="color: {fecha_color};">📅 Límite: {fecha_fmt}</span>
+                        <span style="background: rgba(255,255,255,0.05); padding: 0 8px; border-radius: 4px; color: rgba(255,255,255,0.5); font-size: 11px; text-transform: uppercase;">
+                            {tarea['estado']}
+                        </span>
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px;">
