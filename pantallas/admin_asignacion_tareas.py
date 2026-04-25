@@ -56,6 +56,7 @@ def _get_asignaciones():
             t.nombre_tarea  AS tarea,
             a.fecha_meta,
             a.estado,
+            a.peso,
             a.fecha_creacion
         FROM asignaciones a
         JOIN usuarios u ON a.usuario_id = u.id
@@ -81,9 +82,10 @@ def _crear_asignacion(data: dict):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO asignaciones (usuario_id, empresa_id, tarea_id, fecha_meta, estado)
-        VALUES (%s, %s, %s, %s, 'pendiente')
-    """, (data["usuario_id"], data["empresa_id"], data["tarea_id"], data["fecha_meta"]))
+        INSERT INTO asignaciones (usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
+        VALUES (%s, %s, %s, %s, 'pendiente', %s)
+    """, (data["usuario_id"], data["empresa_id"], data["tarea_id"],
+          data["fecha_meta"], data["peso"]))
     conn.commit()
     cur.close(); conn.close()
 
@@ -93,10 +95,10 @@ def _actualizar_asignacion(aid: int, data: dict):
     cur = conn.cursor()
     cur.execute("""
         UPDATE asignaciones
-        SET usuario_id=%s, empresa_id=%s, tarea_id=%s, fecha_meta=%s, estado=%s
+        SET usuario_id=%s, empresa_id=%s, tarea_id=%s, fecha_meta=%s, estado=%s, peso=%s
         WHERE id=%s
     """, (data["usuario_id"], data["empresa_id"], data["tarea_id"],
-        data["fecha_meta"], data["estado"], aid))
+          data["fecha_meta"], data["estado"], data["peso"], aid))
     conn.commit()
     cur.close(); conn.close()
 
@@ -121,6 +123,16 @@ def _badge_estado(estado: str) -> str:
     }
     bg, color, label = cfg.get(estado, ("rgba(255,255,255,0.08)", "white", estado.upper()))
     return f'<span style="background:{bg};color:{color};padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;">{label}</span>'
+
+
+def _badge_peso(peso: int) -> str:
+    if peso >= 8:
+        bg, color = "rgba(240,149,149,0.15)", "#F09595"
+    elif peso >= 4:
+        bg, color = "rgba(246,194,125,0.15)", "#f6c27d"
+    else:
+        bg, color = "rgba(93,202,165,0.15)", "#5DCAA5"
+    return f'<span style="background:{bg};color:{color};padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;">P:{peso}</span>'
 
 
 def _alerta_fecha(fecha_meta) -> str:
@@ -152,10 +164,6 @@ def _form_asignacion(prefill: dict = None, key_prefix: str = "new"):
     usr_names = list(usr_map.keys())
     emp_names = list(emp_map.keys())
     tar_names = list(tar_map.keys())
-
-    # índices por defecto en edición
-    def idx_of(lst, val, fallback=0):
-        return lst.index(val) if val in lst else fallback
 
     usr_default = 0
     emp_default = 0
@@ -195,12 +203,36 @@ def _form_asignacion(prefill: dict = None, key_prefix: str = "new"):
         fecha_meta = st.date_input("Fecha meta *", value=fecha_default,
                                    format="DD/MM/YYYY", key=f"{key_prefix}_fecha")
 
-    estado = "pendiente"
+    # ── Fila inferior: peso + estado (en edición) ────────────────
+    peso_default = prefill.get("peso", 1) if prefill else 1
+
     if prefill:
-        estado = st.selectbox("Estado", ["pendiente", "completada", "vencida"],
-                              index=["pendiente", "completada", "vencida"].index(
-                                  prefill.get("estado", "pendiente")),
-                              key=f"{key_prefix}_estado")
+        col_peso, col_estado = st.columns(2)
+        with col_peso:
+            peso = st.number_input(
+                "Peso * " ,
+                min_value=1, max_value=10,
+                value=int(peso_default),
+                step=1,
+                key=f"{key_prefix}_peso"
+            )
+        with col_estado:
+            estado = st.selectbox(
+                "Estado",
+                ["pendiente", "completada", "vencida"],
+                index=["pendiente", "completada", "vencida"].index(
+                    prefill.get("estado", "pendiente")),
+                key=f"{key_prefix}_estado"
+            )
+    else:
+        estado = "pendiente"
+        peso = st.number_input(
+            "Peso * (1 = bajo, 10 = crítico)",
+            min_value=1, max_value=10,
+            value=1,
+            step=1,
+            key=f"{key_prefix}_peso"
+        )
 
     return {
         "usuario_id": usr_map.get(usr_sel),
@@ -208,6 +240,7 @@ def _form_asignacion(prefill: dict = None, key_prefix: str = "new"):
         "tarea_id":   tar_map.get(tar_sel),
         "fecha_meta": fecha_meta,
         "estado":     estado,
+        "peso":       peso,
         # para el mensaje de confirmación
         "_trabajador": usr_sel,
         "_tarea":      tar_sel,
@@ -310,7 +343,7 @@ def admin_asignacion_tarea():
         asignaciones = [a for a in asignaciones if a["estado"] == filtro_estado]
 
     # Contador resumen
-    total     = len(asignaciones)
+    total       = len(asignaciones)
     pendientes  = sum(1 for a in asignaciones if a["estado"] == "pendiente")
     vencidas    = sum(1 for a in asignaciones if a["estado"] == "vencida")
     completadas = sum(1 for a in asignaciones if a["estado"] == "completada")
@@ -337,7 +370,7 @@ def admin_asignacion_tarea():
 
     # Cabecera tabla
     st.markdown("""
-    <div style="display:grid;grid-template-columns:1.5fr 2fr 1.8fr 1fr 1fr 90px;
+    <div style="display:grid;grid-template-columns:1.5fr 2fr 1.8fr 1fr 1fr 80px 90px;
                 gap:8px;padding:8px 16px;
                 color:rgba(255,255,255,0.4);font-size:11px;
                 letter-spacing:1px;text-transform:uppercase;
@@ -347,6 +380,7 @@ def admin_asignacion_tarea():
         <span>Tarea</span>
         <span>Fecha meta</span>
         <span>Estado</span>
+        <span>Peso</span>
         <span></span>
     </div>
     """, unsafe_allow_html=True)
@@ -354,9 +388,10 @@ def admin_asignacion_tarea():
     for a in asignaciones:
         fecha_str = a["fecha_meta"].strftime("%d/%m/%Y") if hasattr(a["fecha_meta"], "strftime") else str(a["fecha_meta"])
         alerta    = _alerta_fecha(a["fecha_meta"])
+        peso_val  = a.get("peso", 1) or 1
 
         st.markdown(f"""
-        <div style="display:grid;grid-template-columns:1.5fr 2fr 1.8fr 1fr 1fr 90px;
+        <div style="display:grid;grid-template-columns:1.5fr 2fr 1.8fr 1fr 1fr 80px 90px;
                     gap:8px;align-items:center;padding:12px 16px;
                     background:rgba(255,255,255,0.03);border-radius:12px;
                     border:1px solid rgba(255,255,255,0.05);margin-bottom:6px;">
@@ -368,12 +403,13 @@ def admin_asignacion_tarea():
             <span style="color:rgba(255,255,255,0.85);font-size:12px;">{a['tarea']}</span>
             <span style="color:rgba(255,255,255,0.7);font-size:12px;">{fecha_str}{alerta}</span>
             <span>{_badge_estado(a['estado'])}</span>
+            <span>{_badge_peso(peso_val)}</span>
             <span></span>
         </div>
         """, unsafe_allow_html=True)
 
         # Botones acción
-        _, _, _, _, _, col_acc = st.columns([1.5, 2, 1.8, 1, 1, 0.9])
+        _, _, _, _, _, _, col_acc = st.columns([1.5, 2, 1.8, 1, 1, 0.8, 0.9])
         with col_acc:
             ba1, ba2 = st.columns(2)
             with ba1:
@@ -428,7 +464,7 @@ def admin_asignacion_tarea():
             st.warning(f"¿Eliminar la asignación de **{a['tarea']}** para {a['alias']}?")
             d1, d2 = st.columns(2)
             with d1:
-                if st.button("🗑️ Confirmar", use_container_width=True,
+                if st.button(" Confirmar", use_container_width=True,
                              key=f"confirm_del_asig_{a['id']}", type="primary"):
                     try:
                         _eliminar_asignacion(a["id"])
