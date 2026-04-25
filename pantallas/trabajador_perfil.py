@@ -1,6 +1,7 @@
 import streamlit as st
 from config.db import get_connection
 from styles.main import get_admin_style
+from components.ui import section_header, metric_card
 
 def _get_user_full_data(uid):
     """Obtiene datos detallados del usuario incluyendo área y subárea."""
@@ -83,6 +84,26 @@ def trabajador_perfil():
             </div>
         </div>
     """, unsafe_allow_html=True)
+
+    # --- SECCIÓN DE RENDIMIENTO ---
+    section_header("Mi Rendimiento", "Tus estadísticas del mes actual", "📊")
+    
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        metric_card("Tareas Hoy", "8", "✅")
+
+    with col_m2:
+        metric_card("Tareas Semana", "42", "📅")
+
+    with col_m3:
+        metric_card("Eficiencia", "91%", "🎯")
+
+    with col_m4:
+        metric_card("Puntuación", "4.7", "⭐")
+
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
 
     col1, col2 = st.columns([1.1, 0.9], gap="large")
 

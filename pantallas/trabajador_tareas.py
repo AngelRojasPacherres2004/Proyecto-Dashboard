@@ -34,7 +34,7 @@ def _get_detalle_asignacion(asignacion_id):
             YEAR(a.fecha_meta) as anio,
             MONTHNAME(a.fecha_meta) as mes
         FROM asignaciones a
-        JOIN empresas e ON a.empresa_id = e.id
+        JOIN empresas e ON a.empresa_id = e.idcd
         JOIN tareas t ON a.tarea_id = t.id
         JOIN usuarios u ON a.usuario_id = u.id
         WHERE a.id = %s

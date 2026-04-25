@@ -38,27 +38,8 @@ def render_trabajador_dashboard(user):
     # ================= HEADER =================
     page_header("Panel de Trabajador", f"Bienvenido, {user.get('alias', 'Trabajador')}")
 
-    # ================= MÉTRICAS PERSONALES =================
-    section_header("Mi Rendimiento", "Tus estadísticas del mes actual", "📊")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        metric_card("Tareas Hoy", "8", "✅")
-
-    with col2:
-        metric_card("Tareas Semana", "42", "📅")
-
-    with col3:
-        metric_card("Eficiencia", "91%", "🎯")
-
-    with col4:
-        metric_card("Puntuación", "4.7", "⭐")
-
-    st.markdown("---")
-
     # ================= TAREAS PENDIENTES =================
-    section_header("Tareas Pendientes", "Actividades que requieren tu atención", "📋")
+    section_header("Tareas Pendientes", "Actividades actuales", "📋")
 
     # Obtener tareas reales de la base de datos
     tareas_pendientes = get_tareas_pendientes_usuario(user.get("id"))
@@ -84,13 +65,11 @@ def render_trabajador_dashboard(user):
            onmouseout="this.style.transform='translateX(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'">
             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <div style="flex: 1;">
-                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center;">
                         <span style="font-size: 16px; margin-right: 8px;">{estado_icono}</span>
                         <h4 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">{tarea['titulo']}</h4>
                     </div>
                     <div style="display: flex; gap: 16px; font-size: 14px;">
-                        <span style="color: {prioridad_color};">🔥 Prioridad</span>
-                        <span style="color: rgba(255,255,255,0.7);">📅 {fecha_fmt}</span>
                         <span style="color: rgba(255,255,255,0.7);">{tarea['estado']}</span>
                     </div>
                 </div>
@@ -107,32 +86,3 @@ def render_trabajador_dashboard(user):
             st.rerun()
 
     st.markdown("---")
-
-    # ================= ACTIVIDAD RECIENTE =================
-    section_header("Actividad Reciente", "Tu historial de las últimas 24 horas", "🕒")
-
-    actividades = [
-        {"accion": "Completaste tarea: 'Actualizar perfil de usuario'", "hora": "Hace 2 horas", "tipo": "completada"},
-        {"accion": "Iniciaste sesión en el sistema", "hora": "Hace 8 horas", "tipo": "login"},
-        {"accion": "Actualizaste tu información personal", "hora": "Hace 1 día", "tipo": "perfil"}
-    ]
-
-    for actividad in actividades:
-        icono = {"completada": "✅", "login": "🔑", "perfil": "👤"}.get(actividad["tipo"], "📝")
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.02);
-            padding: 12px 16px;
-            border-radius: 10px;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            border: 1px solid rgba(255,255,255,0.05);
-        ">
-            <span style="font-size: 16px; margin-right: 12px;">{icono}</span>
-            <div style="flex: 1; color: rgba(255,255,255,0.9);">
-                {actividad['accion']}
-            </div>
-            <span style="color: rgba(255,255,255,0.5); font-size: 12px;">{actividad['hora']}</span>
-        </div>
-        """, unsafe_allow_html=True)
