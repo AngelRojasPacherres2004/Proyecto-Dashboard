@@ -7,6 +7,17 @@ from styles.main import get_admin_style
 from pantallas.trabajador_perfil import trabajador_perfil
 from pantallas.trabajador_tareas import vista_detalle_tarea, render_nueva_tarea_placeholder, get_tareas_pendientes_usuario
 
+def _badge_estado_tarea(estado: str) -> str:
+    """Genera un badge de estado estilizado."""
+    cfg = {
+        "pendiente":   ("rgba(246,194,125,0.15)", "#f6c27d"),
+        "en progreso": ("rgba(133,183,235,0.15)", "#85B7EB"),
+        "completada":  ("rgba(93,202,165,0.15)",  "#5DCAA5"),
+        "vencida":     ("rgba(240,149,149,0.15)", "#F09595"),
+    }
+    bg, color = cfg.get(estado.lower(), ("rgba(255,255,255,0.08)", "white"))
+    return f'<span style="background:{bg};color:{color};padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;">{estado}</span>'
+
 def trabajador_home():
     # ================= ESTILO =================
     st.markdown(get_admin_style(), unsafe_allow_html=True)
@@ -47,80 +58,48 @@ def render_trabajador_dashboard(user):
     if not tareas_pendientes:
         st.info("No tienes tareas pendientes asignadas.")
 
+    # Cabecera de la tabla alineada
+    with st.container():
+        hcol1, hcol2, hcol3, hcol4, hcol5 = st.columns([2.5, 2, 1.5, 1.2, 0.8])
+        headers = ["TAREA", "EMPRESA", "FECHA LÍMITE", "ESTADO", "ACCIONES"]
+        for col, header in zip([hcol1, hcol2, hcol3, hcol4, hcol5], headers):
+            col.markdown(f"<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>{header}</span>", unsafe_allow_html=True)
+    
+    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+
     for tarea in tareas_pendientes:
-        # Como la prioridad no está en la base de datos aún, usaremos un color por defecto o lógica de fecha
-        prioridad_color = "#f6c27d" # Color dorado institucional
         estado_icono = {"pendiente": "⏳", "en progreso": "🔄", "completada": "✅"}.get(tarea["estado"].lower(), "⏳")
         fecha_fmt = tarea['fecha_limite'].strftime("%d/%m/%Y") if hasattr(tarea['fecha_limite'], 'strftime') else tarea['fecha_limite']
         
-        # Lógica de alerta de fecha
         hoy = datetime.now().date()
-        vencida = tarea['fecha_limite'] < hoy if hasattr(tarea['fecha_limite'], 'date') else False
-        fecha_color = "#F09595" if vencida else "rgba(255,255,255,0.6)"
+        es_vencida = tarea['fecha_limite'] < hoy if hasattr(tarea['fecha_limite'], 'date') else False
+        fecha_color = "#F09595" if es_vencida else "white"
+        alerta_vencido = " ⚠" if es_vencida else ""
         
-        st.markdown(f"""
-        <div style="
-            background: linear-gradient(90deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
-            padding: 22px;
-            border-radius: 18px;
-            border-left: 6px solid {prioridad_color};
-            border-top: 1px solid rgba(255,255,255,0.06);
-            border-right: 1px solid rgba(255,255,255,0.03);
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-            margin-bottom: 18px;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        " onmouseover="this.style.transform='translateY(-3px)'; this.style.boxShadow='0 6px 16px rgba(0,0,0,0.25)'"
-           onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div style="flex: 1;">
-                    <div style="display: flex; align-items: center;">
-                        <span style="font-size: 20px; margin-right: 14px;">{estado_icono}</span>
-                        <h4 style="color: white; margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.4px;">{tarea['titulo']}</h4>
+        with st.container(border=True):
+            col1, col2, col3, col4, col5 = st.columns([2.5, 2, 1.5, 1.2, 0.8])
+            
+            with col1:
+                st.markdown(f"""
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 16px;">{estado_icono}</span>
+                        <span style="color:white; font-weight:600; font-size:14px;">{tarea['titulo']}</span>
                     </div>
-                    <div style="display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; margin-top: 12px; margin-left: 34px;">
-                        <span style="color: #85B7EB; font-weight: 600;">🏢 {tarea['empresa']}</span>
-                        <span style="color: {fecha_color}; font-weight: 600;">📅 Límite: {fecha_fmt}</span>
-                        <span style="background: rgba(255,255,255,0.08); padding: 3px 11px; border-radius: 7px; color: rgba(255,255,255,0.65); font-size: 10.5px; text-transform: uppercase; font-weight: 700;">
-                            {tarea['estado']}
-                        </span>
-                    </div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"<span style='color:#85B7EB; font-size:13px; font-weight:500;'>🏢 {tarea['empresa']}</span>", unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"<span style='color:{fecha_color}; font-size:13px;'>📅 {fecha_fmt}{alerta_vencido}</span>", unsafe_allow_html=True)
+            
+            with col4:
+                st.markdown(_badge_estado_tarea(tarea['estado']), unsafe_allow_html=True)
+            
+            with col5:
+                if st.button("🔎 Ver", key=f"btn_det_{tarea['id']}", use_container_width=True):
+                    st.session_state.tarea_seleccionada_id = tarea['id']
+                    st.session_state.vista_actual = "detalle"
+                    st.rerun()
 
-        # Botón funcional estilizado, ahora más integrado visualmente
-        # Usando una columna pequeña para empujar el botón a la derecha, haciéndolo menos "blocky"
-        col_spacer, col_button = st.columns([0.8, 0.2])
-        with col_button:
-            # CSS personalizado para el botón para hacerlo más pequeño y como un icono
-            st.markdown(f"""
-                <style>
-                    div[data-testid="stButton"] > button[key="btn_det_{tarea['id']}"] {{
-                        background-color: rgba(246, 194, 125, 0.15);
-                        color: #f6c27d;
-                        border-radius: 50%;
-                        width: 40px;
-                        height: 40px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 18px;
-                        border: none;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                        transition: all 0.2s ease;
-                    }}
-                    div[data-testid="stButton"] > button[key="btn_det_{tarea['id']}"]:hover {{
-                        background-color: #f6c27d;
-                        color: #1e1e1e;
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-                    }}
-                </style>
-            """, unsafe_allow_html=True)
-            if st.button("🔎", key=f"btn_det_{tarea['id']}"): # Texto cambiado a icono
-                st.session_state.tarea_seleccionada_id = tarea['id']
-                st.session_state.vista_actual = "detalle"
-                st.rerun()
-
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True) # Espaciado reducido
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
