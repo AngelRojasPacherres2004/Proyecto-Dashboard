@@ -1,6 +1,7 @@
 import streamlit as st
 from config.db import get_connection
 from styles.main import get_admin_style
+from components.ui import section_header, metric_card
 
 def _get_user_full_data(uid):
     """Obtiene datos detallados del usuario incluyendo área y subárea."""
@@ -85,10 +86,10 @@ def trabajador_perfil():
     """, unsafe_allow_html=True)
 
     col1, col2 = st.columns([1.1, 0.9], gap="large")
-
     with col1:
-        st.markdown("<h4 style='color: white; margin-bottom: 1.2rem; font-size: 16px;'>📋 Información de Cuenta</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='color: white; margin-bottom: 1.2rem; font-size: 16px;'>Información de Cuenta</h4>", unsafe_allow_html=True)
         
+        info_cols = st.columns(2)
         info_items = [
             ("Alias Institucional", user_data['alias']),
             ("Nombre de Usuario", f"@{user_data['usuario']}"),
@@ -97,24 +98,34 @@ def trabajador_perfil():
             ("Fecha de Ingreso", user_data['fecha_creacion'].strftime("%d/%m/%Y") if user_data['fecha_creacion'] else "—")
         ]
 
-        for label, val in info_items:
-            st.markdown(f"""
-                <div style="background: rgba(255,255,255,0.015); padding: 12px 16px; border-radius: 10px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="color: rgba(255,255,255,0.35); font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 2px;">{label}</div>
-                    <div style="color: white; font-size: 15px; font-weight: 500;">{val}</div>
-                </div>
-            """, unsafe_allow_html=True)
+        for i, (label, val) in enumerate(info_items):
+            with info_cols[i % 2]:
+                st.markdown(f"""
+                    <div style="background: rgba(255,255,255,0.02); padding: 15px; border-radius: 12px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="color: rgba(255,255,255,0.4); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 4px;">{label}</div>
+                        <div style="color: white; font-size: 14px; font-weight: 600;">{val}</div>
+                    </div>
+                """, unsafe_allow_html=True)
 
-    with col2:
-        st.markdown("<h4 style='color: white; margin-bottom: 1.2rem; font-size: 16px;'>🔒 Seguridad</h4>", unsafe_allow_html=True)
-        with st.form("perfil_pass_form"):
-            st.caption("Cambiar contraseña de acceso")
-            new_p = st.text_input("Nueva contraseña", type="password")
-            conf_p = st.text_input("Confirmar contraseña", type="password")
-            
-            if st.form_submit_button("Actualizar Acceso", use_container_width=True):
-                if new_p and new_p == conf_p:
-                    _update_password(user_id, new_p)
-                    st.success("Contraseña actualizada.")
-                else:
-                    st.error("Las contraseñas no coinciden.")
+
+  # --- SECCIÓN DE RENDIMIENTO ---
+    section_header("Mi Rendimiento", "Tus estadísticas del mes actual", "📊")
+    
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        metric_card("Tareas Hoy", "8", "✔")
+
+    with col_m2:
+        metric_card("Tareas Semana", "42", "🗓")
+
+    with col_m3:
+        metric_card("Eficiencia", "91%", "🎯")
+
+    with col_m4:
+        metric_card("Puntuación", "4.7", "☆")
+
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+
+   

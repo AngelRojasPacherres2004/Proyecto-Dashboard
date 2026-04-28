@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from config.db import get_connection
 from datetime import date
 import pandas as pd
@@ -111,13 +112,61 @@ def _get_asignacion_by_id(aid: int):
     return row
 
 
+def _buscar_o_crear_asignacion(usuario_id, empresa_id, tarea_id, fecha_meta, peso):
+    """Busca asignación existente por combinación única. Si no existe, la crea."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id FROM asignaciones
+        WHERE usuario_id=%s AND empresa_id=%s AND tarea_id=%s AND fecha_meta=%s
+        LIMIT 1
+    """, (usuario_id, empresa_id, tarea_id, fecha_meta))
+    row = cur.fetchone()
+    if row:
+        asig_id = row["id"]
+    else:
+        cur.execute("""
+            INSERT INTO asignaciones (usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
+            VALUES (%s, %s, %s, %s, 'completada', %s)
+        """, (usuario_id, empresa_id, tarea_id, fecha_meta, peso))
+        conn.commit()
+        asig_id = cur.lastrowid
+    cur.close(); conn.close()
+    return asig_id
+
+
+def _insertar_registro_tarea(asignacion_id, fecha_realizada, rendimiento):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO registros_tareas (asignacion_id, fecha_realizada, rendimiento)
+        VALUES (%s, %s, %s)
+    """, (asignacion_id, fecha_realizada, rendimiento))
+    conn.commit()
+    cur.close(); conn.close()
+
+
+def _calcular_rendimiento(fecha_realizada, fecha_meta):
+    if isinstance(fecha_realizada, str):
+        fecha_realizada = datetime.strptime(fecha_realizada, "%Y-%m-%d").date()
+    if isinstance(fecha_meta, str):
+        fecha_meta = datetime.strptime(fecha_meta, "%Y-%m-%d").date()
+    if fecha_realizada < fecha_meta:
+        return "OPTIMO"
+    elif fecha_realizada == fecha_meta:
+        return "MEDIO"
+    else:
+        return "BAJO"
+
+
 def _crear_asignacion(data: dict):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO asignaciones (usuario_id, empresa_id, tarea_id, fecha_meta, estado)
-        VALUES (%s, %s, %s, %s, 'pendiente')
-    """, (data["usuario_id"], data["empresa_id"], data["tarea_id"], data["fecha_meta"]))
+        INSERT INTO asignaciones (usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
+        VALUES (%s, %s, %s, %s, 'pendiente', %s)
+    """, (data["usuario_id"], data["empresa_id"], data["tarea_id"],
+          data["fecha_meta"], data["peso"]))
     conn.commit()
     cur.close(); conn.close()
 
@@ -127,7 +176,7 @@ def _actualizar_asignacion(aid: int, data: dict):
     cur = conn.cursor()
     cur.execute("""
         UPDATE asignaciones
-        SET usuario_id=%s, empresa_id=%s, tarea_id=%s, fecha_meta=%s, estado=%s
+        SET usuario_id=%s, empresa_id=%s, tarea_id=%s, fecha_meta=%s, estado=%s, peso=%s
         WHERE id=%s
     """, (data["usuario_id"], data["empresa_id"], data["tarea_id"],
           data["fecha_meta"], data["estado"], aid))
@@ -200,7 +249,6 @@ def _alerta_fecha(fecha_meta, estado: str = None) -> str:
         return ""
     hoy = date.today()
     if isinstance(fecha_meta, str):
-        from datetime import datetime
         fecha_meta = datetime.strptime(fecha_meta, "%Y-%m-%d").date()
     
     # Si está completada, no mostrar alerta de vencimiento
@@ -231,47 +279,43 @@ def _form_asignacion(prefill: dict = None, key_prefix: str = "new"):
     tar_names = list(tar_map.keys())
 
     usr_default = emp_default = tar_default = 0
+    usr_default = emp_default = tar_default = 0
 
     if prefill:
-        uid = prefill.get("usuario_id")
-        eid = prefill.get("empresa_id")
-        tid = prefill.get("tarea_id")
         for i, u in enumerate(usuarios):
-            if u["id"] == uid:
-                usr_default = i; break
+            if u["id"] == prefill.get("usuario_id"): usr_default = i; break
         for i, e in enumerate(empresas):
-            if e["id"] == eid:
-                emp_default = i; break
+            if e["id"] == prefill.get("empresa_id"): emp_default = i; break
         for i, t in enumerate(tareas):
-            if t["id"] == tid:
-                tar_default = i; break
+            if t["id"] == prefill.get("tarea_id"):   tar_default = i; break
 
     col1, col2 = st.columns(2)
-
     with col1:
-        usr_sel = st.selectbox("Trabajador *", usr_names,
-                               index=usr_default, key=f"{key_prefix}_usr")
-        tar_sel = st.selectbox("Tarea *", tar_names,
-                               index=tar_default, key=f"{key_prefix}_tar")
-
+        usr_sel = st.selectbox("Trabajador *", usr_names, index=usr_default, key=f"{key_prefix}_usr")
+        tar_sel = st.selectbox("Tarea *",      tar_names, index=tar_default, key=f"{key_prefix}_tar")
     with col2:
-        emp_sel = st.selectbox("Empresa *", emp_names,
-                               index=emp_default, key=f"{key_prefix}_emp")
-
+        emp_sel = st.selectbox("Empresa *", emp_names, index=emp_default, key=f"{key_prefix}_emp")
         fecha_default = prefill["fecha_meta"] if prefill and prefill.get("fecha_meta") else date.today()
         if isinstance(fecha_default, str):
-            from datetime import datetime
             fecha_default = datetime.strptime(fecha_default, "%Y-%m-%d").date()
-
         fecha_meta = st.date_input("Fecha meta *", value=fecha_default,
                                    format="DD/MM/YYYY", key=f"{key_prefix}_fecha")
 
-    estado = "pendiente"
+    peso_default = prefill.get("peso", 1) if prefill else 1
     if prefill:
-        estado = st.selectbox("Estado", ["pendiente", "completada", "vencida"],
-                              index=["pendiente", "completada", "vencida"].index(
-                                  prefill.get("estado", "pendiente")),
-                              key=f"{key_prefix}_estado")
+        col_peso, col_estado = st.columns(2)
+        with col_peso:
+            peso = st.number_input("Peso *", min_value=1, max_value=10,
+                                   value=int(peso_default), step=1, key=f"{key_prefix}_peso")
+        with col_estado:
+            estado = st.selectbox("Estado", ["pendiente", "completada", "vencida"],
+                                  index=["pendiente", "completada", "vencida"].index(
+                                      prefill.get("estado", "pendiente")),
+                                  key=f"{key_prefix}_estado")
+    else:
+        estado = "pendiente"
+        peso = st.number_input("Peso * (1=bajo, 10=crítico)", min_value=1, max_value=10,
+                               value=1, step=1, key=f"{key_prefix}_peso")
 
     return {
         "usuario_id": usr_map.get(usr_sel),
@@ -553,7 +597,6 @@ def admin_asignacion_tarea():
         if key not in st.session_state:
             st.session_state[key] = None if key != "asig_pagina_actual" else 1
 
-    # ── Mensaje de feedback ──────────────────────────────────────
     if st.session_state.asig_msg:
         tipo, texto = st.session_state.asig_msg
         (st.success if tipo == "ok" else st.error)(texto)
