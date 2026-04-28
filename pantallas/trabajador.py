@@ -60,39 +60,67 @@ def render_trabajador_dashboard(user):
         
         st.markdown(f"""
         <div style="
-            background: rgba(255,255,255,0.03);
-            padding: 16px;
-            border-radius: 12px;
-            border-left: 4px solid {prioridad_color};
-            border-right: 1px solid rgba(255,255,255,0.05);
-            margin-bottom: 12px;
+            background: linear-gradient(90deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
+            padding: 22px;
+            border-radius: 18px;
+            border-left: 6px solid {prioridad_color};
+            border-top: 1px solid rgba(255,255,255,0.06);
+            border-right: 1px solid rgba(255,255,255,0.03);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            margin-bottom: 18px;
             transition: all 0.3s ease;
-        " onmouseover="this.style.transform='translateX(4px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)'"
-           onmouseout="this.style.transform='translateX(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'">
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        " onmouseover="this.style.transform='translateY(-3px)'; this.style.boxShadow='0 6px 16px rgba(0,0,0,0.25)'"
+           onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'">
             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <div style="flex: 1;">
                     <div style="display: flex; align-items: center;">
-                        <span style="font-size: 16px; margin-right: 8px;">{estado_icono}</span>
-                        <h4 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">{tarea['titulo']}</h4>
+                        <span style="font-size: 20px; margin-right: 14px;">{estado_icono}</span>
+                        <h4 style="color: white; margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.4px;">{tarea['titulo']}</h4>
                     </div>
-                    <div style="display: flex; gap: 16px; font-size: 13px; margin-top: 6px; margin-left: 24px;">
-                        <span style="color: #85B7EB; font-weight: 500;">🏢 {tarea['empresa']}</span>
-                        <span style="color: {fecha_color};">📅 Límite: {fecha_fmt}</span>
-                        <span style="background: rgba(255,255,255,0.05); padding: 0 8px; border-radius: 4px; color: rgba(255,255,255,0.5); font-size: 11px; text-transform: uppercase;">
+                    <div style="display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; margin-top: 12px; margin-left: 34px;">
+                        <span style="color: #85B7EB; font-weight: 600;">🏢 {tarea['empresa']}</span>
+                        <span style="color: {fecha_color}; font-weight: 600;">📅 Límite: {fecha_fmt}</span>
+                        <span style="background: rgba(255,255,255,0.08); padding: 3px 11px; border-radius: 7px; color: rgba(255,255,255,0.65); font-size: 10.5px; text-transform: uppercase; font-weight: 700;">
                             {tarea['estado']}
                         </span>
                     </div>
-                </div>
-                <div style="display: flex; gap: 8px;">
                 </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        # Botón funcional de Streamlit para "Ver detalles"
-        if st.button(f"🔎 Ver detalles: {tarea['titulo']}", key=f"btn_det_{tarea['id']}"):
-            st.session_state.tarea_seleccionada_id = tarea['id']
-            st.session_state.vista_actual = "detalle"
-            st.rerun()
+        # Botón funcional estilizado, ahora más integrado visualmente
+        # Usando una columna pequeña para empujar el botón a la derecha, haciéndolo menos "blocky"
+        col_spacer, col_button = st.columns([0.8, 0.2])
+        with col_button:
+            # CSS personalizado para el botón para hacerlo más pequeño y como un icono
+            st.markdown(f"""
+                <style>
+                    div[data-testid="stButton"] > button[key="btn_det_{tarea['id']}"] {{
+                        background-color: rgba(246, 194, 125, 0.15);
+                        color: #f6c27d;
+                        border-radius: 50%;
+                        width: 40px;
+                        height: 40px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 18px;
+                        border: none;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                        transition: all 0.2s ease;
+                    }}
+                    div[data-testid="stButton"] > button[key="btn_det_{tarea['id']}"]:hover {{
+                        background-color: #f6c27d;
+                        color: #1e1e1e;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                    }}
+                </style>
+            """, unsafe_allow_html=True)
+            if st.button("🔎", key=f"btn_det_{tarea['id']}"): # Texto cambiado a icono
+                st.session_state.tarea_seleccionada_id = tarea['id']
+                st.session_state.vista_actual = "detalle"
+                st.rerun()
 
-    st.markdown("---")
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True) # Espaciado reducido

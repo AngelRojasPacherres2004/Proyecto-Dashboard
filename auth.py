@@ -30,6 +30,23 @@ def login():
     # 🎨 estilo login
     st.markdown(get_login_style(), unsafe_allow_html=True)
 
+    st.markdown("""
+        <style>
+            /* Limpia el contenedor para que no se vea blanco ni con sombras raras */
+            .stTextInput div[data-baseweb="input"] {
+                background-color: #040728c4 !important;
+                border: 1px solid rgba(255,255,255,0.2) !important;
+                box-shadow: none !important;
+            }
+            /* Aplica el color solicitado al input interno y asegura el texto blanco */
+            .stTextInput input {
+                background-color: #040728c4 !important;
+                color: white !important;
+                -webkit-text-fill-color: white !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.markdown('<div class="login-shell">', unsafe_allow_html=True)
     col_hero, col_card = st.columns([1.05, 0.95], gap="large")
 

@@ -71,11 +71,11 @@ def vista_detalle_tarea(asignacion_id):
     # Encabezado de la vista
     st.markdown(f"""
         <div style='margin-bottom: 2rem; display: flex; align-items: center; gap: 15px;'>
-            <div style='background: #f6c27d; color: #1e1e1e; padding: 10px; border-radius: 10px; font-weight: 800;'>
+            <div style='background: #f6c27d; color: #1e1e1e; padding: 12px 18px; border-radius: 12px; font-weight: 900; box-shadow: 0 4px 15px rgba(246, 194, 125, 0.2);'>
                 ID #{detalle['id']}
             </div>
             <div>
-                <h2 style='color: white; font-size: 22px; font-weight: 700; margin: 0;'>Detalles de la Actividad</h2>
+                <h2 style='color: white; font-size: 24px; font-weight: 800; margin: 0;'>Detalles de la Actividad</h2>
                 <p style='color: rgba(255,255,255,0.5); font-size: 13px; margin: 0;'>Revisión y actualización de progreso</p>
             </div>
         </div>
@@ -83,16 +83,18 @@ def vista_detalle_tarea(asignacion_id):
 
     # Formulario Elegante
     with st.container():
+        st.markdown("<div style='background: rgba(255,255,255,0.02); padding: 30px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         
         with col1:
             st.text_input("📅 AÑO", value=str(detalle['anio']), disabled=True)
             st.text_input("🏢 EMPRESA", value=detalle['empresa'], disabled=True)
-            st.text_input("📋 TAREA", value=detalle['tarea'], disabled=True)
+            st.markdown(f"**📋 TAREA**")
+            st.markdown(f"<div style='background: rgba(246, 194, 125, 0.05); border: 1px solid rgba(246, 194, 125, 0.2); padding: 12px; border-radius: 8px; color: #f6c27d; font-weight: 600; margin-bottom: 15px;'>{detalle['tarea']}</div>", unsafe_allow_html=True)
             
         with col2:
             st.text_input("🗓️ MES", value=str(detalle['mes']).upper(), disabled=True)
-            st.text_input("� ENCARGADO", value=detalle['encargado'], disabled=True)
+            st.text_input("👤 ENCARGADO", value=detalle['encargado'], disabled=True)
             estado_opciones = ["pendiente", "en progreso", "completada"]
             nuevo_estado = st.selectbox("🔄 ACTUALIZAR ESTADO", estado_opciones, 
                                       index=estado_opciones.index(detalle['estado'].lower()) if detalle['estado'].lower() in estado_opciones else 0)
@@ -104,6 +106,7 @@ def vista_detalle_tarea(asignacion_id):
             st.date_input("✅ FECHA REALIZADA", value=datetime.now())
 
         st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
         
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
