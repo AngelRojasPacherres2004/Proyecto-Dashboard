@@ -451,7 +451,7 @@ def admin_usuarios():
                         else:
                             try:
                                 _actualizar_usuario(u["id"], datos)
-                                st.session_state.crud_msg  = ("ok", f"✅ Usuario '{datos['alias']}' actualizado.")
+                                st.session_state.crud_msg  = ("ok", f"✔ Usuario '{datos['alias']}' actualizado.")
                                 st.session_state.modo_crud  = None
                                 st.session_state.uid_editar = None
                             except Exception as e:
@@ -475,7 +475,7 @@ def admin_usuarios():
                              key=f"confirm_del_{u['id']}", type="primary"):
                     try:
                         _eliminar_usuario(u["id"])
-                        st.session_state.crud_msg     = ("ok", "✅ Usuario eliminado.")
+                        st.session_state.crud_msg     = ("ok", "✔ Usuario eliminado.")
                         st.session_state.uid_eliminar = None
                     except Exception as e:
                         st.session_state.crud_msg = ("error", f"No se puede eliminar: {e}")

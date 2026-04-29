@@ -785,23 +785,14 @@ def admin_asignacion_tarea():
         fin = inicio + REGISTROS_POR_PAGINA
         asignaciones_pagina = asignaciones[inicio:fin]
 
-        # Cabecera tabla
-        st.markdown("""
-        <div style="display:grid;grid-template-columns:0.8fr 1.4fr 1.4fr 1fr 1.1fr 1.1fr 1.1fr 80px;
-                    gap:8px;padding:8px 16px;
-                    color:rgba(255,255,255,0.4);font-size:10px;
-                    letter-spacing:1px;text-transform:uppercase;
-                    border-bottom:1px solid rgba(255,255,255,0.07);margin-bottom:4px;">
-            <span>Trabajador</span>
-            <span>Empresa</span>
-            <span>Tarea</span>
-            <span>Proyecto</span>
-            <span>F. Meta</span>
-            <span>F. Realizada</span>
-            <span>Estado</span>
-            <span></span>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(border=False):
+            cols_h = st.columns([0.8, 1.4, 1.4, 1, 1.1, 1.1, 1.1, 0.9])
+            headers = ["TRABAJADOR", "EMPRESA", "TAREA", "PROYECTO", "F. META", "F. REALIZADA", "ESTADO", "ACCIONES"]
+            for col, header in zip(cols_h, headers):
+                with col:
+                    st.markdown(f"<span style='color:rgba(255,255,255,0.4);font-weight:600;font-size:10px;letter-spacing:1px;'>{header}</span>", unsafe_allow_html=True)
+        
+        st.divider()
 
         for a in asignaciones_pagina:
             fecha_meta_str = a["fecha_meta"].strftime("%d/%m/%Y") if hasattr(a["fecha_meta"], "strftime") else str(a["fecha_meta"])
@@ -811,38 +802,33 @@ def admin_asignacion_tarea():
             
             alerta = _alerta_fecha(a["fecha_meta"], a["estado"])
 
-            st.markdown(f"""
-            <div style="display:grid;grid-template-columns:0.8fr 1.4fr 1.4fr 1fr 1.1fr 1.1fr 1.1fr 80px;
-                        gap:8px;align-items:center;padding:12px 16px;
-                        background:rgba(255,255,255,0.03);border-radius:12px;
-                        border:1px solid rgba(255,255,255,0.05);margin-bottom:6px;">
-                <div>
-                    <span style="color:white;font-weight:600;font-size:12px;">{a['alias']}</span>
-                    <span style="color:rgba(255,255,255,0.3);font-size:10px;display:block;">{a['trabajador']}</span>
-                </div>
-                <span style="color:rgba(255,255,255,0.7);font-size:12px;">{a['empresa']}</span>
-                <span style="color:rgba(255,255,255,0.85);font-size:12px;">{a['tarea']}</span>
-                <span style="color:rgba(255,255,255,0.5);font-size:11px;">{a['proyecto']}</span>
-                <span style="color:rgba(255,255,255,0.7);font-size:12px;">{fecha_meta_str}{alerta}</span>
-                <span style="color:rgba(255,255,255,0.6);font-size:11px;">{fecha_realizada_str}</span>
-                <span>{_badge_estado(a['estado'])}</span>
-                <span></span>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Botones acción
-            _, _, _, _, _, _, _, col_acc = st.columns([0.8, 1.4, 1.4, 1, 1.1, 1.1, 1.1, 0.9])
-            with col_acc:
-                ba1, ba2 = st.columns(2)
-                with ba1:
-                    if st.button("✏️", key=f"edit_asig_{a['id']}", help="Editar"):
-                        st.session_state.asig_modo      = "editar"
-                        st.session_state.asig_id_editar = a["id"]
-                        st.rerun()
-                with ba2:
-                    if st.button("🗑️", key=f"del_asig_{a['id']}", help="Eliminar"):
-                        st.session_state.asig_id_eliminar = a["id"]
-                        st.rerun()
+            with st.container(border=True):
+                col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([0.8, 1.4, 1.4, 1, 1.1, 1.1, 1.1, 0.9])
+                with col1:
+                    st.markdown(f"""<div><span style="color:white;font-weight:600;font-size:12px;">{a['alias']}</span><br><span style="color:rgba(255,255,255,0.3);font-size:10px;">{a['trabajador']}</span></div>""", unsafe_allow_html=True)
+                with col2:
+                    st.markdown(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{a['empresa']}</span>", unsafe_allow_html=True)
+                with col3:
+                    st.markdown(f"<span style='color:rgba(255,255,255,0.85);font-size:12px;'>{a['tarea']}</span>", unsafe_allow_html=True)
+                with col4:
+                    st.markdown(f"<span style='color:rgba(255,255,255,0.5);font-size:11px;'>{a['proyecto']}</span>", unsafe_allow_html=True)
+                with col5:
+                    st.markdown(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{fecha_meta_str}{alerta}</span>", unsafe_allow_html=True)
+                with col6:
+                    st.markdown(f"<span style='color:rgba(255,255,255,0.6);font-size:11px;'>{fecha_realizada_str}</span>", unsafe_allow_html=True)
+                with col7:
+                    st.markdown(_badge_estado(a['estado']), unsafe_allow_html=True)
+                with col8:
+                    ba1, ba2 = st.columns(2, gap="small")
+                    with ba1:
+                        if st.button("🖍", key=f"edit_asig_{a['id']}", help="Editar", use_container_width=True):
+                            st.session_state.asig_modo      = "editar"
+                            st.session_state.asig_id_editar = a["id"]
+                            st.rerun()
+                    with ba2:
+                        if st.button("🗑️", key=f"del_asig_{a['id']}", help="Eliminar", use_container_width=True):
+                            st.session_state.asig_id_eliminar = a["id"]
+                            st.rerun()
 
             # ── Formulario editar inline ─────────────────────────
             if st.session_state.asig_modo == "editar" and st.session_state.asig_id_editar == a["id"]:
