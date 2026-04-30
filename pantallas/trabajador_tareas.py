@@ -1,6 +1,6 @@
 import streamlit as st
 from config.db import get_connection
-from datetime import datetime
+from datetime import datetime, date
 
 def get_tareas_pendientes_usuario(usuario_id):
     """Obtiene las tareas asignadas a un usuario que no han sido completadas."""
@@ -34,7 +34,8 @@ def _get_detalle_asignacion(asignacion_id):
             t.nombre_tarea as tarea,
             u.nom_res as encargado,
             YEAR(a.fecha_meta) as anio,
-            MONTHNAME(a.fecha_meta) as mes
+            MONTHNAME(a.fecha_meta) as mes,
+            a.usuario_id, a.tarea_id, a.empresa_id
         FROM asignaciones a
         JOIN empresas e ON a.empresa_id = e.id
         JOIN tareas t ON a.tarea_id = t.id
@@ -45,17 +46,141 @@ def _get_detalle_asignacion(asignacion_id):
     cur.close(); conn.close()
     return row
 
-def _update_progreso_tarea(asignacion_id, nuevo_estado):
-    """Actualiza el estado de la tarea en la base de datos."""
+def _get_grupo_trabajo(tarea_id, empresa_id, fecha_meta):
+    """
+    Obtiene todas las asignaciones del mismo grupo (misma tarea, empresa y fecha_meta).
+    Retorna lista de tuplas (id, usuario_id) donde id es la referencia principal.
+    """
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        UPDATE asignaciones 
-        SET estado = %s 
-        WHERE id = %s
-    """, (nuevo_estado, asignacion_id))
-    conn.commit()
+        SELECT id, usuario_id
+        FROM asignaciones
+        WHERE tarea_id = %s AND empresa_id = %s AND fecha_meta = %s
+        ORDER BY id ASC
+    """, (tarea_id, empresa_id, fecha_meta))
+    rows = cur.fetchall()
     cur.close(); conn.close()
+    return rows
+
+def _calcular_rendimiento(fecha_realizada, fecha_meta):
+    """Calcula el rendimiento basado en la fecha de realización vs fecha meta."""
+    if isinstance(fecha_realizada, str):
+        fecha_realizada = datetime.strptime(fecha_realizada, "%Y-%m-%d").date()
+    if isinstance(fecha_meta, str):
+        fecha_meta = datetime.strptime(fecha_meta, "%Y-%m-%d").date()
+    
+    if fecha_realizada <= fecha_meta:
+        return "OPTIMO"
+    else:
+        diff = (fecha_realizada - fecha_meta).days
+        if diff <= 3:
+            return "MEDIO"
+        else:
+            return "BAJO"
+
+def _upsert_registro_tarea(asignacion_id, usuario_id, fecha_realizada, rendimiento):
+    """
+    Inserta o actualiza un registro en registros_tareas.
+    
+    Evita duplicados usando asignacion_id + usuario_id como clave única.
+    - Si existe: ACTUALIZA fecha_realizada y rendimiento
+    - Si no existe: INSERTA nuevo registro
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # Verificar si ya existe un registro con esta combinación de asignacion_id + usuario_id
+        cur.execute("""
+            SELECT id FROM registros_tareas
+            WHERE asignacion_id = %s AND usuario_id = %s
+            LIMIT 1
+        """, (asignacion_id, usuario_id))
+        registro_existente = cur.fetchone()
+        
+        if registro_existente:
+            # ACTUALIZAR: Si el registro ya existe, actualiza los valores
+            cur.execute("""
+                UPDATE registros_tareas
+                SET fecha_realizada = %s, rendimiento = %s
+                WHERE asignacion_id = %s AND usuario_id = %s
+            """, (fecha_realizada, rendimiento, asignacion_id, usuario_id))
+        else:
+            # INSERTAR: Si no existe, crea un nuevo registro
+            cur.execute("""
+                INSERT INTO registros_tareas (asignacion_id, usuario_id, fecha_realizada, rendimiento)
+                VALUES (%s, %s, %s, %s)
+            """, (asignacion_id, usuario_id, fecha_realizada, rendimiento))
+        
+        conn.commit()
+        return True
+    except Exception as ex:
+        conn.rollback()
+        return False
+    finally:
+        cur.close(); conn.close()
+
+def _update_progreso_tarea(asignacion_id, nuevo_estado, usuario_id, fecha_realizada, tarea_id, empresa_id, fecha_meta):
+    """
+    Actualiza el estado de la tarea y registra el progreso.
+    
+    Usa 'id' como referencia principal en asignaciones.
+    
+    Si nuevo_estado es "completada":
+    - Obtiene TODAS las asignaciones del grupo (tarea_id, empresa_id, fecha_meta)
+    - Registra en registros_tareas para cada usuario del grupo (evitando duplicados con UPSERT)
+    - Actualiza TODAS las asignaciones del grupo a "completada"
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # Calcular rendimiento basado en fecha_realizada y fecha_meta
+        rendimiento = _calcular_rendimiento(fecha_realizada, fecha_meta)
+        
+        if nuevo_estado.lower() == "completada":
+            # PASO 1: Obtener todas las asignaciones (id, usuario_id) del grupo
+            grupo = _get_grupo_trabajo(tarea_id, empresa_id, fecha_meta)
+            
+            if not grupo:
+                return False
+            
+            # PASO 2: Registrar progreso para cada usuario del grupo (evitando duplicados)
+            for asig_dict in grupo:
+                asig_id = asig_dict["id"]
+                uid = asig_dict["usuario_id"]
+                
+                # Usar UPSERT para evitar duplicados
+                _upsert_registro_tarea(asig_id, uid, fecha_realizada, rendimiento)
+            
+            # PASO 3: Actualizar todas las asignaciones del grupo a "completada"
+            # Usar IN clause para actualizar todas en una sola query
+            ids_grupo = [asig["id"] for asig in grupo]
+            placeholders = ','.join(['%s'] * len(ids_grupo))
+            cur.execute(f"""
+                UPDATE asignaciones 
+                SET estado = %s 
+                WHERE id IN ({placeholders})
+            """, ["completada"] + ids_grupo)
+            
+            conn.commit()
+        else:
+            # Para estados que no son completada, solo actualiza el actual
+            _upsert_registro_tarea(asignacion_id, usuario_id, fecha_realizada, rendimiento)
+            
+            cur.execute("""
+                UPDATE asignaciones 
+                SET estado = %s 
+                WHERE id = %s
+            """, (nuevo_estado, asignacion_id))
+            
+            conn.commit()
+        
+        return True
+    except Exception as ex:
+        conn.rollback()
+        return False
+    finally:
+        cur.close(); conn.close()
 
 def vista_detalle_tarea(asignacion_id):
     """Muestra el formulario detallado de la tarea."""
@@ -103,7 +228,7 @@ def vista_detalle_tarea(asignacion_id):
         with c_meta:
             st.text_input("🎯 FECHA META", value=detalle['fecha_meta'].strftime("%d/%m/%Y"), disabled=True)
         with c_cant:
-            st.date_input("✅ FECHA REALIZADA", value=datetime.now())
+            fecha_realizada = st.date_input("✅ FECHA REALIZADA", value=datetime.now(), key="fecha_realizada_key")
 
         st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
@@ -111,8 +236,19 @@ def vista_detalle_tarea(asignacion_id):
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
             if st.button("💾 Guardar Cambios", use_container_width=True, type="primary"):
-                _update_progreso_tarea(detalle['id'], nuevo_estado)
-                st.success("Progreso guardado.")
+                success = _update_progreso_tarea(
+                    detalle['id'], 
+                    nuevo_estado,
+                    detalle['usuario_id'],
+                    fecha_realizada,
+                    detalle['tarea_id'],
+                    detalle['empresa_id'],
+                    detalle['fecha_meta']
+                )
+                if success:
+                    st.success("Progreso guardado.")
+                else:
+                    st.error("Error al guardar el progreso.")
         
         with btn_col2:
             if st.button("🔙 Volver al Listado", use_container_width=True):
