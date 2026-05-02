@@ -6,76 +6,96 @@ from datetime import datetime, timedelta
 from styles.main import get_admin_style
 from components.sidebar import admin_sidebar
 from config.db import get_connection
-from pantallas.admin_usuarios import admin_usuarios 
+from pantallas.admin_usuarios import admin_usuarios
 from pantallas.admin_empresas import admin_empresas
 from pantallas.admin_asignacion_tareas import admin_asignacion_tarea
 
 
 # ================================================================
-#  FUNCIONES PARA OBTENER ESTADÍSTICAS
+#  PALETA DE COLORES CONSISTENTE
+# ================================================================
+COLORES = {
+    "completada": "#5DCAA5",
+    "pendiente":  "#F6C27D",
+    "vencida":    "#F09595",
+    "activo":     "#5DCAA5",
+    "inactivo":   "#95949f",
+    "primary":    "#4A90D9",
+    "secondary":  "#7B68EE",
+}
+
+ESTADO_COLORS = {
+    "completada": COLORES["completada"],
+    "pendiente":  COLORES["pendiente"],
+    "vencida":    COLORES["vencida"],
+}
+
+LAYOUT_BASE = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="Inter, sans-serif", size=12),
+    margin=dict(l=10, r=10, t=40, b=10),
+    height=340,
+)
+
+
+# ================================================================
+#  CONSULTAS A LA BASE DE DATOS
 # ================================================================
 
-def _get_stats_usuarios():
-    """Obtiene estadísticas de usuarios"""
+def _get_stats_generales():
+    """
+    Retorna en una sola consulta:
+    - total usuarios, activos/inactivos por rol
+    - total empresas activas/inactivas
+    - total asignaciones por estado
+    """
     conn = get_connection()
     cur = conn.cursor()
+
+    # Usuarios
     cur.execute("""
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as activos,
-            SUM(CASE WHEN estado = 'inactivo' THEN 1 ELSE 0 END) as inactivos,
-            rol
+        SELECT rol,
+               COUNT(*) AS total,
+               SUM(CASE WHEN estado = 'activo'   THEN 1 ELSE 0 END) AS activos,
+               SUM(CASE WHEN estado = 'inactivo' THEN 1 ELSE 0 END) AS inactivos
         FROM usuarios
         GROUP BY rol
     """)
-    rows = cur.fetchall()
-    cur.close(); conn.close()
-    return rows
+    usuarios = cur.fetchall()
 
-
-def _get_stats_empresas():
-    """Obtiene estadísticas de empresas"""
-    conn = get_connection()
-    cur = conn.cursor()
+    # Empresas
     cur.execute("""
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN estado_contrato = 'Activo' THEN 1 ELSE 0 END) as activas,
-            SUM(CASE WHEN estado_contrato != 'Activo' THEN 1 ELSE 0 END) as inactivas
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN estado_contrato = 'Activo' THEN 1 ELSE 0 END) AS activas,
+               SUM(CASE WHEN estado_contrato != 'Activo' THEN 1 ELSE 0 END) AS inactivas
         FROM empresas
     """)
-    row = cur.fetchone()
-    cur.close(); conn.close()
-    return row
+    empresas = cur.fetchone()
 
-
-def _get_stats_tareas():
-    """Obtiene estadísticas de tareas/asignaciones"""
-    conn = get_connection()
-    cur = conn.cursor()
+    # Asignaciones
     cur.execute("""
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pendientes,
-            SUM(CASE WHEN estado = 'completada' THEN 1 ELSE 0 END) as completadas,
-            SUM(CASE WHEN estado = 'vencida' THEN 1 ELSE 0 END) as vencidas
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN estado = 'pendiente'  THEN 1 ELSE 0 END) AS pendientes,
+               SUM(CASE WHEN estado = 'completada' THEN 1 ELSE 0 END) AS completadas,
+               SUM(CASE WHEN estado = 'vencida'    THEN 1 ELSE 0 END) AS vencidas
         FROM asignaciones
     """)
-    row = cur.fetchone()
-    cur.close(); conn.close()
-    return row
+    asignaciones = cur.fetchone()
+
+    cur.close()
+    conn.close()
+    return usuarios, empresas, asignaciones
 
 
-def _get_usuarios_por_area():
-    """Obtiene cantidad de usuarios por área"""
+def _get_tareas_por_estado():
+    """Distribución de asignaciones por estado."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT a.nombre_area, COUNT(u.id) as cantidad
-        FROM areas a
-        LEFT JOIN subareas s ON a.id = s.area_id
-        LEFT JOIN usuarios u ON s.id = u.subarea_id
-        GROUP BY a.id, a.nombre_area
+        SELECT estado, COUNT(*) AS cantidad
+        FROM asignaciones
+        GROUP BY estado
         ORDER BY cantidad DESC
     """)
     rows = cur.fetchall()
@@ -83,43 +103,77 @@ def _get_usuarios_por_area():
     return rows
 
 
-def _get_tareas_por_estado():
-    """Obtiene tareas agrupadas por estado"""
+def _get_carga_por_usuario():
+    """
+    Cantidad de asignaciones (pendientes + vencidas) por usuario.
+    Útil para ver quién tiene más carga de trabajo activa.
+    """
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT estado, COUNT(*) as cantidad
-        FROM asignaciones
-        GROUP BY estado
+        SELECT u.nom_res AS nombre,
+               COUNT(*) AS total,
+               SUM(CASE WHEN a.estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
+               SUM(CASE WHEN a.estado = 'completada' THEN 1 ELSE 0 END) AS completadas,
+               SUM(CASE WHEN a.estado = 'vencida'   THEN 1 ELSE 0 END) AS vencidas
+        FROM asignaciones a
+        JOIN usuarios u ON a.usuario_id = u.id
+        GROUP BY u.id, u.nom_res
+        ORDER BY total DESC
+        LIMIT 10
     """)
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
 
 
-def _get_tareas_ultimos_7_dias():
-    """Obtiene tareas completadas en los últimos 7 días"""
+def _get_tareas_por_empresa():
+    """Cuántas asignaciones tiene cada empresa, desglosado por estado."""
     conn = get_connection()
     cur = conn.cursor()
-    fecha_inicio = (datetime.now() - timedelta(days=7)).date()
     cur.execute("""
-        SELECT DATE(fecha_creacion) as fecha, COUNT(*) as cantidad
+        SELECT e.alias AS empresa,
+               COUNT(*) AS total,
+               SUM(CASE WHEN a.estado = 'completada' THEN 1 ELSE 0 END) AS completadas,
+               SUM(CASE WHEN a.estado = 'pendiente'  THEN 1 ELSE 0 END) AS pendientes,
+               SUM(CASE WHEN a.estado = 'vencida'    THEN 1 ELSE 0 END) AS vencidas
+        FROM asignaciones a
+        JOIN empresas e ON a.empresa_id = e.id
+        GROUP BY e.id, e.alias
+        ORDER BY total DESC
+    """)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
+
+def _get_completadas_por_mes():
+    """
+    Tareas completadas agrupadas por mes (año-mes).
+    Muestra la tendencia histórica de productividad.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT DATE_FORMAT(fecha_meta, '%Y-%m') AS mes,
+               COUNT(*) AS completadas
         FROM asignaciones
-        WHERE fecha_creacion >= %s
-        GROUP BY DATE(fecha_creacion)
-        ORDER BY fecha ASC
-    """, (fecha_inicio,))
+        WHERE estado = 'completada'
+        GROUP BY mes
+        ORDER BY mes ASC
+    """)
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
 
 
 def _get_empresas_por_regimen():
-    """Obtiene empresas agrupadas por régimen tributario"""
+    """Empresas activas agrupadas por régimen tributario."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT regimen_tributario, COUNT(*) as cantidad
+        SELECT COALESCE(regimen_tributario, 'Sin régimen') AS regimen,
+               COUNT(*) AS cantidad
         FROM empresas
         WHERE estado_contrato = 'Activo'
         GROUP BY regimen_tributario
@@ -130,180 +184,273 @@ def _get_empresas_por_regimen():
     return rows
 
 
+def _get_tareas_por_proyecto():
+    """
+    Cuántas asignaciones tiene cada proyecto (DJ vs PLAME),
+    desglosado por estado.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT p.nombre_proyecto AS proyecto,
+               a.estado,
+               COUNT(*) AS cantidad
+        FROM asignaciones a
+        JOIN tareas t ON a.tarea_id = t.id
+        JOIN proyectos p ON t.proyecto_id = p.id
+        GROUP BY p.nombre_proyecto, a.estado
+        ORDER BY proyecto, estado
+    """)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
+
+def _get_vencimiento_proximo():
+    """
+    Asignaciones pendientes cuya fecha_meta vence en los próximos 15 días.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    hoy = datetime.now().date()
+    limite = hoy + timedelta(days=15)
+    cur.execute("""
+        SELECT u.alias AS usuario,
+               e.alias AS empresa,
+               t.nombre_tarea AS tarea,
+               a.fecha_meta,
+               DATEDIFF(a.fecha_meta, CURDATE()) AS dias_restantes
+        FROM asignaciones a
+        JOIN usuarios u ON a.usuario_id = u.id
+        JOIN empresas e ON a.empresa_id = e.id
+        JOIN tareas t   ON a.tarea_id   = t.id
+        WHERE a.estado = 'pendiente'
+          AND a.fecha_meta BETWEEN %s AND %s
+        ORDER BY a.fecha_meta ASC
+        LIMIT 20
+    """, (hoy, limite))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
+
+# ================================================================
+#  FUNCIÓN PRINCIPAL
+# ================================================================
+
 def admin_home():
 
-    # ================= ESTILO GLOBAL =================
     st.markdown(get_admin_style(), unsafe_allow_html=True)
 
-    # ================= USER =================
-    user = st.session_state.get("user", {})
-
-    # ================= SIDEBAR =================
+    user   = st.session_state.get("user", {})
     opcion = admin_sidebar(user)
 
-    # ================= HEADER CONTENIDO =================
     st.markdown(f"""
-    <div style="margin-bottom:25px;">
-        <h1 class="page-title">Panel Admin</h1>
-        <p class="page-subtitle">Bienvenido, {user.get('alias', 'Admin')}</p>
-    </div>
-""", unsafe_allow_html=True)
+        <div style="margin-bottom:25px;">
+            <h1 class="page-title">Panel Admin</h1>
+            <p class="page-subtitle">Bienvenido, {user.get('alias', 'Admin')}</p>
+        </div>
+    """, unsafe_allow_html=True)
 
     st.divider()
 
-    # ================= ROUTING =================
+    # ================================================================
+    #  ROUTING
+    # ================================================================
     if opcion == "Dashboard":
-        
-        # ============ ESTADÍSTICAS PRINCIPALES ============
-        stats_usuarios = _get_stats_usuarios()
-        stats_empresas = _get_stats_empresas()
-        stats_tareas = _get_stats_tareas()
-        
-        total_usuarios = sum([row['total'] for row in stats_usuarios]) if stats_usuarios else 0
-        total_usuarios_activos = sum([row['activos'] for row in stats_usuarios]) if stats_usuarios else 0
-        total_empresas = stats_empresas['total'] if stats_empresas else 0
-        total_empresas_activas = stats_empresas['activas'] if stats_empresas else 0
-        total_tareas = stats_tareas['total'] if stats_tareas else 0
-        tareas_pendientes = stats_tareas['pendientes'] if stats_tareas else 0
-
-        # ============ TARJETAS MÉTRICAS ============
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">USUARIOS TOTALES</div>
-                <div class="metric-value">{total_usuarios}</div>
-                <div class="metric-subtitle">↳ {total_usuarios_activos} activos</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col2:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">EMPRESAS ACTIVAS</div>
-                <div class="metric-value">{total_empresas_activas}/{total_empresas}</div>
-                <div class="metric-subtitle">Contratos activos</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col3:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">TAREAS TOTALES</div>
-                <div class="metric-value">{total_tareas}</div>
-                <div class="metric-subtitle">↳ {tareas_pendientes} pendientes</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col4:
-            tasa_completacion = round((stats_tareas['completadas'] / total_tareas * 100) if total_tareas > 0 else 0)
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">TASA COMPLETACIÓN</div>
-                <div class="metric-value">{tasa_completacion}%</div>
-                <div class="metric-subtitle">{stats_tareas['completadas']} completadas</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.divider()
-
-        # ============ GRÁFICOS FILA 1 ============
-        col1, col2 = st.columns(2)
-
-        with col1:
-            # Gráfico: Estado de Tareas (Pie)
-            tareas_por_estado = _get_tareas_por_estado()
-            if tareas_por_estado:
-                df_tareas = pd.DataFrame(tareas_por_estado)
-                fig_tareas_estado = px.pie(
-                    df_tareas,
-                    values='cantidad',
-                    names='estado',
-                    title='Distribución de Tareas por Estado',
-                    color_discrete_map={
-                        'pendiente': '#f6c27d',
-                        'completada': '#5DCAA5',
-                        'vencida': '#F09595'
-                    }
-                )
-                fig_tareas_estado.update_layout(height=350)
-                st.plotly_chart(fig_tareas_estado, use_container_width=True)
-
-        with col2:
-            # Gráfico: Usuarios por Rol (Bar)
-            if stats_usuarios:
-                df_usuarios = pd.DataFrame(stats_usuarios)
-                fig_usuarios_rol = px.bar(
-                    df_usuarios,
-                    x='rol',
-                    y=['activos', 'inactivos'],
-                    title='Usuarios por Rol y Estado',
-                    labels={'value': 'Cantidad', 'rol': 'Rol'},
-                    color_discrete_map={'activos': '#5DCAA5', 'inactivos': '#95949f'},
-                    barmode='stack'
-                )
-                fig_usuarios_rol.update_layout(height=350)
-                st.plotly_chart(fig_usuarios_rol, use_container_width=True)
-
-        # ============ GRÁFICOS FILA 2 ============
-        col1, col2 = st.columns(2)
-
-        with col1:
-            # Gráfico: Usuarios por Área
-            usuarios_por_area = _get_usuarios_por_area()
-            if usuarios_por_area:
-                df_areas = pd.DataFrame(usuarios_por_area)
-                fig_areas = px.bar(
-                df_areas.sort_values('cantidad', ascending=True),
-                x='cantidad',
-                y='nombre_area',
-                title='Usuarios por Área',
-                labels={'cantidad': 'Cantidad de Usuarios', 'nombre_area': 'Área'},
-                color='cantidad',
-                color_continuous_scale='Viridis',
-                orientation='h'  # 🔥 clave
-                )
-                fig_areas.update_layout(height=350, showlegend=False)
-                st.plotly_chart(fig_areas, use_container_width=True)
-
-        with col2:
-            # Gráfico: Empresas por Régimen Tributario
-            empresas_regimen = _get_empresas_por_regimen()
-            if empresas_regimen:
-                df_regimen = pd.DataFrame(empresas_regimen)
-                fig_regimen = px.bar(
-                    df_regimen,
-                    x='regimen_tributario',
-                    y='cantidad',
-                    title='Empresas Activas por Régimen Tributario',
-                    labels={'cantidad': 'Cantidad', 'regimen_tributario': 'Régimen'},
-                    color='cantidad',
-                    color_continuous_scale='Blues'
-                )
-                fig_regimen.update_layout(height=350, showlegend=False)
-                st.plotly_chart(fig_regimen, use_container_width=True)
-
-        # ============ GRÁFICO FILA 3 ============
-        # Gráfico: Tareas últimos 7 días
-        tareas_7dias = _get_tareas_ultimos_7_dias()
-        if tareas_7dias:
-            df_7dias = pd.DataFrame(tareas_7dias)
-            fig_7dias = px.line(
-                df_7dias,
-                x='fecha',
-                y='cantidad',
-                title='Tareas Creadas - Últimos 7 Días',
-                markers=True,
-                labels={'fecha': 'Fecha', 'cantidad': 'Cantidad de Tareas'}
-            )
-            fig_7dias.update_layout(height=350, hovermode='x unified')
-            st.plotly_chart(fig_7dias, use_container_width=True)
+        _render_dashboard()
 
     elif opcion == "Usuarios":
-        admin_usuarios()  
+        admin_usuarios()
 
     elif opcion == "Empresas":
         admin_empresas()
+
     elif opcion == "Asignaciones":
         admin_asignacion_tarea()
+
+
+# ================================================================
+#  RENDER DEL DASHBOARD
+# ================================================================
+
+def _render_dashboard():
+
+    # ── Carga de datos ──────────────────────────────────────────
+    stats_usuarios, stats_empresas, stats_asig = _get_stats_generales()
+
+    total_usuarios        = sum(r["total"]   for r in stats_usuarios) if stats_usuarios else 0
+    total_activos         = sum(r["activos"] for r in stats_usuarios) if stats_usuarios else 0
+    total_empresas        = stats_empresas["total"]   if stats_empresas else 0
+    total_emp_activas     = stats_empresas["activas"] if stats_empresas else 0
+    total_asignaciones    = stats_asig["total"]       if stats_asig else 0
+    total_pendientes      = stats_asig["pendientes"]  if stats_asig else 0
+    total_completadas     = stats_asig["completadas"] if stats_asig else 0
+    total_vencidas        = stats_asig["vencidas"]    if stats_asig else 0
+    tasa_completacion     = round(total_completadas / total_asignaciones * 100) if total_asignaciones else 0
+
+    # ── KPI Cards ───────────────────────────────────────────────
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    _kpi(col1, "USUARIOS",        total_usuarios,     f"↳ {total_activos} activos")
+    _kpi(col2, "EMPRESAS ACTIVAS",f"{total_emp_activas}/{total_empresas}", "Contratos vigentes")
+    _kpi(col3, "ASIGNACIONES",    total_asignaciones, f"↳ {total_pendientes} pendientes")
+    _kpi(col4, "VENCIDAS",        total_vencidas,     "Requieren atención", color="#F09595")
+    _kpi(col5, "TASA COMPLETACIÓN", f"{tasa_completacion}%", f"{total_completadas} completadas", color="#5DCAA5")
+
+    st.divider()
+
+    # ── Fila 1: Estado global + Carga por usuario ───────────────
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        data_estado = _get_tareas_por_estado()
+        if data_estado:
+            df = pd.DataFrame(data_estado)
+            fig = px.pie(
+                df, values="cantidad", names="estado",
+                title="Estado de Asignaciones",
+                color="estado",
+                color_discrete_map=ESTADO_COLORS,
+                hole=0.45,
+            )
+            fig.update_traces(textposition="outside", textinfo="percent+label")
+            fig.update_layout(**LAYOUT_BASE, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        data_carga = _get_carga_por_usuario()
+        if data_carga:
+            df = pd.DataFrame(data_carga)
+            df = df.sort_values("total", ascending=True)
+            fig = go.Figure()
+            for estado, color in [("completadas", COLORES["completada"]),
+                                   ("pendientes",  COLORES["pendiente"]),
+                                   ("vencidas",    COLORES["vencida"])]:
+                fig.add_trace(go.Bar(
+                    name=estado.capitalize(),
+                    y=df["nombre"],
+                    x=df[estado],
+                    orientation="h",
+                    marker_color=color,
+                ))
+            fig.update_layout(
+                **LAYOUT_BASE,
+                title="Carga de Trabajo por Usuario (Top 10)",
+                barmode="stack",
+                xaxis_title="Asignaciones",
+                yaxis_title="",
+                legend=dict(orientation="h", y=-0.15),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ── Fila 2: Tareas por empresa + Régimen tributario ─────────
+    col1, col2 = st.columns(2)
+
+    with col1:
+        data_emp = _get_tareas_por_empresa()
+        if data_emp:
+            df = pd.DataFrame(data_emp).sort_values("total", ascending=True)
+            fig = go.Figure()
+            for estado, color in [("completadas", COLORES["completada"]),
+                                   ("pendientes",  COLORES["pendiente"]),
+                                   ("vencidas",    COLORES["vencida"])]:
+                fig.add_trace(go.Bar(
+                    name=estado.capitalize(),
+                    y=df["empresa"],
+                    x=df[estado],
+                    orientation="h",
+                    marker_color=color,
+                ))
+            fig.update_layout(
+                **LAYOUT_BASE,
+                title="Asignaciones por Empresa",
+                barmode="stack",
+                xaxis_title="Cantidad",
+                yaxis_title="",
+                legend=dict(orientation="h", y=-0.2),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        data_reg = _get_empresas_por_regimen()
+        if data_reg:
+            df = pd.DataFrame(data_reg)
+            fig = px.bar(
+                df, x="regimen", y="cantidad",
+                title="Empresas Activas por Régimen Tributario",
+                color="cantidad",
+                color_continuous_scale="Blues",
+                text="cantidad",
+            )
+            fig.update_traces(textposition="outside")
+            fig.update_layout(**LAYOUT_BASE, xaxis_title="Régimen", yaxis_title="Empresas",
+                              coloraxis_showscale=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ── Fila 3: Tendencia mensual + DJ vs PLAME ─────────────────
+    col1, col2 = st.columns(2)
+
+    with col1:
+        data_mes = _get_completadas_por_mes()
+        if data_mes:
+            df = pd.DataFrame(data_mes)
+            fig = px.area(
+                df, x="mes", y="completadas",
+                title="Tareas Completadas por Mes",
+                labels={"mes": "Mes", "completadas": "Completadas"},
+                color_discrete_sequence=[COLORES["completada"]],
+            )
+            fig.update_layout(**LAYOUT_BASE, hovermode="x unified")
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        data_proy = _get_tareas_por_proyecto()
+        if data_proy:
+            df = pd.DataFrame(data_proy)
+            fig = px.bar(
+                df, x="proyecto", y="cantidad", color="estado",
+                title="Asignaciones por Proyecto",
+                color_discrete_map=ESTADO_COLORS,
+                barmode="group",
+                text="cantidad",
+            )
+            fig.update_traces(textposition="outside")
+            fig.update_layout(**LAYOUT_BASE, xaxis_title="Proyecto", yaxis_title="Asignaciones",
+                              legend_title="Estado")
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ── Fila 4: Tabla de próximos vencimientos ──────────────────
+    st.subheader("⚠️ Asignaciones por Vencer (próximos 15 días)")
+    data_venc = _get_vencimiento_proximo()
+    if data_venc:
+        df = pd.DataFrame(data_venc)
+        df["fecha_meta"] = pd.to_datetime(df["fecha_meta"]).dt.strftime("%d/%m/%Y")
+        df.columns = ["Usuario", "Empresa", "Tarea", "Fecha Meta", "Días Restantes"]
+
+        def _color_dias(val):
+            if val <= 3:
+                return "background-color:#F09595; color:#7a0000; font-weight:bold"
+            elif val <= 7:
+                return "background-color:#F6C27D; color:#7a4000"
+            return ""
+
+        styled = df.style.applymap(_color_dias, subset=["Días Restantes"])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+    else:
+        st.success("✅ No hay asignaciones pendientes por vencer en los próximos 15 días.")
+
+
+# ================================================================
+#  HELPER: tarjeta KPI
+# ================================================================
+
+def _kpi(col, label: str, value, subtitle: str = "", color: str = "#4A90D9"):
+    with col:
+        st.markdown(f"""
+        <div class="metric-card" style="border-top: 3px solid {color};">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value" style="color:{color};">{value}</div>
+            <div class="metric-subtitle">{subtitle}</div>
+        </div>
+        """, unsafe_allow_html=True)
