@@ -1,14 +1,13 @@
-import pymysql
 import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
 load_dotenv()
 
 def get_connection():
-    return pymysql.connect(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME"),
-        cursorclass=pymysql.cursors.DictCursor
+    return psycopg2.connect(
+        os.getenv("DATABASE_URL"),
+        sslmode="require",
+        cursor_factory=RealDictCursor
     )

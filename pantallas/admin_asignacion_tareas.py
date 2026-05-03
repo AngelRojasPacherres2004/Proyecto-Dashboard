@@ -75,12 +75,12 @@ def _get_asignaciones(mes=None, anio=None, solo_completadas=False):
         where_clauses.append("a.estado = 'completada'")
 
     if mes and anio:
-        where_clauses.append("MONTH(a.fecha_meta) = %s AND YEAR(a.fecha_meta) = %s")
+        # PostgreSQL: EXTRACT en lugar de MONTH() y YEAR()
+        where_clauses.append("EXTRACT(MONTH FROM a.fecha_meta) = %s AND EXTRACT(YEAR FROM a.fecha_meta) = %s")
         params.extend([mes, anio])
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-    # Traemos TODAS las filas (una por usuario dentro del mismo id de asignación)
     cur.execute(f"""
         SELECT
             a.id,
@@ -120,18 +120,17 @@ def _get_asignaciones(mes=None, anio=None, solo_completadas=False):
         aid = r["id"]
         if aid not in grupos:
             grupos[aid] = {
-                "id":            aid,
-                "empresa":       r["empresa"],
-                "empresa_id":    r["empresa_id"],
-                "tarea":         r["tarea"],
-                "tarea_id":      r["tarea_id"],
-                "proyecto":      r["proyecto"],
-                "fecha_meta":    r["fecha_meta"],
-                "estado":        r["estado"],
+                "id":             aid,
+                "empresa":        r["empresa"],
+                "empresa_id":     r["empresa_id"],
+                "tarea":          r["tarea"],
+                "tarea_id":       r["tarea_id"],
+                "proyecto":       r["proyecto"],
+                "fecha_meta":     r["fecha_meta"],
+                "estado":         r["estado"],
                 "fecha_creacion": r["fecha_creacion"],
-                "peso":          r["peso"],
-                # lista con info de cada trabajador
-                "trabajadores":  [],
+                "peso":           r["peso"],
+                "trabajadores":   [],
             }
         grupos[aid]["trabajadores"].append({
             "usuario_id":      r["usuario_id"],
@@ -149,7 +148,6 @@ def _get_asignacion_grupo_by_id(aid: int):
     cur = conn.cursor()
     cur.execute("SELECT * FROM asignaciones WHERE id = %s LIMIT 1", (aid,))
     row = cur.fetchone()
-    # También traemos todos los usuario_ids del grupo
     cur.execute("SELECT usuario_id FROM asignaciones WHERE id = %s ORDER BY usuario_id", (aid,))
     uids = [r["usuario_id"] for r in cur.fetchall()]
     cur.close(); conn.close()
@@ -157,15 +155,8 @@ def _get_asignacion_grupo_by_id(aid: int):
         row = dict(row)
         row["usuario_ids_grupo"] = uids
     return row
-
-
+    
 def _crear_asignacion(data: dict):
-    """
-    Crea una asignación para MÚLTIPLES usuarios compartiendo el MISMO id.
-    Estrategia:
-      1. Insertamos la primera fila → obtenemos el lastrowid (auto_increment).
-      2. Insertamos el resto con INSERT INTO ... (id, usuario_id, ...) usando ese mismo id.
-    """
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -173,18 +164,14 @@ def _crear_asignacion(data: dict):
         if not uids:
             raise ValueError("Debe seleccionar al menos un trabajador.")
 
-        # Primera fila: deja que AUTO_INCREMENT asigne el id
-        cur.execute("""
-            INSERT INTO asignaciones (usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
-            VALUES (%s, %s, %s, %s, 'pendiente', %s)
-        """, (uids[0], data["empresa_id"], data["tarea_id"],
-              data["fecha_meta"], data.get("peso", 1)))
-        nuevo_id = cur.lastrowid
-
-        # Filas adicionales: mismo id, distinto usuario_id
-        for uid in uids[1:]:
+        # Obtenemos el próximo id via función SQL de Supabase
+        cur.execute("SELECT get_next_asignacion_id() AS nuevo_id")
+        row = cur.fetchone()
+        nuevo_id = row["nuevo_id"]  # ← acceso por nombre, no por índice
+        for uid in uids:
             cur.execute("""
                 INSERT INTO asignaciones (id, usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
+                OVERRIDING SYSTEM VALUE
                 VALUES (%s, %s, %s, %s, %s, 'pendiente', %s)
             """, (nuevo_id, uid, data["empresa_id"], data["tarea_id"],
                   data["fecha_meta"], data.get("peso", 1)))
@@ -196,22 +183,17 @@ def _crear_asignacion(data: dict):
     finally:
         cur.close(); conn.close()
 
-
 def _actualizar_asignacion_grupo(aid: int, data: dict):
     """
     Actualiza TODAS las filas del grupo (mismo id).
-    - Campos comunes (empresa, tarea, fecha_meta, estado, peso) se aplican a TODAS las filas.
-    - Si cambia la lista de usuarios:
-        • Elimina los que ya no están.
-        • Agrega los nuevos.
-        • Deja los que permanecen.
+    - Campos comunes se aplican a todas las filas.
+    - Si cambia la lista de usuarios: elimina los que ya no están, agrega los nuevos.
     """
     conn = get_connection()
     cur = conn.cursor()
     try:
         nuevos_uids = set(data["usuario_ids"])
 
-        # Usuarios actuales en el grupo
         cur.execute("SELECT usuario_id FROM asignaciones WHERE id = %s", (aid,))
         actuales_uids = {r["usuario_id"] for r in cur.fetchall()}
 
@@ -236,10 +218,12 @@ def _actualizar_asignacion_grupo(aid: int, data: dict):
                 (aid, uid)
             )
 
-        # 3. Insertar nuevos usuarios al grupo
+        # 3. Insertar nuevos usuarios al grupo con el mismo id existente
+        # OVERRIDING SYSTEM VALUE necesario para insertar id explícito
         for uid in agregar:
             cur.execute("""
                 INSERT INTO asignaciones (id, usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
+                OVERRIDING SYSTEM VALUE
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (aid, uid, data["empresa_id"], data["tarea_id"],
                   data["fecha_meta"], data["estado"], data["peso"]))
@@ -296,22 +280,26 @@ def _calcular_rendimiento(fecha_realizada, fecha_meta):
     else:
         return "BAJO"
 
-
 def _insertar_asignacion_bulk(usuario_id, empresa_id, tarea_id, fecha_meta, fecha_realizada, rendimiento):
-    """Importación Excel: inserta asignación individual + su registro_tarea."""
     conn = get_connection()
     cur = conn.cursor()
     try:
+        cur.execute("SELECT get_next_asignacion_id()")
+        nuevo_id = cur.fetchone()[0]
+
+        if not nuevo_id or nuevo_id == 0:
+            raise ValueError(f"No se pudo obtener un ID válido: {nuevo_id}")
+
         cur.execute("""
-            INSERT INTO asignaciones (usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
-            VALUES (%s, %s, %s, %s, 'completada', 1)
-        """, (usuario_id, empresa_id, tarea_id, fecha_meta))
-        asignacion_id = cur.lastrowid
+            INSERT INTO asignaciones (id, usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
+            OVERRIDING SYSTEM VALUE
+            VALUES (%s, %s, %s, %s, %s, 'completada', 1)
+        """, (nuevo_id, usuario_id, empresa_id, tarea_id, fecha_meta))
 
         cur.execute("""
             INSERT INTO registros_tareas (asignacion_id, usuario_id, fecha_realizada, rendimiento)
             VALUES (%s, %s, %s, %s)
-        """, (asignacion_id, usuario_id, fecha_realizada, rendimiento))
+        """, (nuevo_id, usuario_id, fecha_realizada, rendimiento))
 
         conn.commit()
         return True, None
@@ -320,8 +308,6 @@ def _insertar_asignacion_bulk(usuario_id, empresa_id, tarea_id, fecha_meta, fech
         return False, str(ex)
     finally:
         cur.close(); conn.close()
-
-
 # ================================================================
 #  HELPERS UI
 # ================================================================
@@ -386,7 +372,6 @@ def _form_asignacion(prefill: dict = None, key_prefix: str = "new"):
     emp_default = 0
     tar_default = 0
 
-    # Valores por defecto al editar
     usr_default_names = []
     if prefill:
         for i, e in enumerate(empresas):
@@ -397,7 +382,6 @@ def _form_asignacion(prefill: dict = None, key_prefix: str = "new"):
             if t["id"] == prefill.get("tarea_id"):
                 tar_default = i
                 break
-        # Pre-seleccionar todos los usuarios del grupo
         grupo_uids = set(prefill.get("usuario_ids_grupo", []))
         usr_default_names = [
             name for name, uid in usr_map.items() if uid in grupo_uids
@@ -405,7 +389,6 @@ def _form_asignacion(prefill: dict = None, key_prefix: str = "new"):
 
     col1, col2 = st.columns(2)
     with col1:
-        # Multiselect tanto al crear como al editar
         usr_sel_multi = st.multiselect(
             "Trabajador(es) * — puedes seleccionar más de uno",
             options=usr_names,
@@ -518,9 +501,9 @@ def _seccion_importar_excel():
     proyectos = _get_proyectos()
     usuarios  = _get_usuarios_activos()
 
-    emp_alias_map    = {e["alias"].strip().upper(): e["id"] for e in empresas}
-    usr_id_set       = {int(u["id"]) for u in usuarios}
-    tarea_por_numero = {int(t["id"]): int(t["id"]) for t in tareas_db}
+    emp_alias_map      = {e["alias"].strip().upper(): e["id"] for e in empresas}
+    usr_id_set         = {int(u["id"]) for u in usuarios}
+    tarea_por_numero   = {int(t["id"]): int(t["id"]) for t in tareas_db}
     proyecto_por_tarea = {int(t["id"]): int(t["proyecto_id"]) for t in tareas_db}
 
     RENDIMIENTOS_VALIDOS = {"BAJO", "MEDIO", "OPTIMO", "URGENTE"}
@@ -871,7 +854,6 @@ def admin_asignacion_tarea():
             )
             alerta = _alerta_fecha(g["fecha_meta"], g["estado"])
 
-            # Columna de trabajadores: lista de aliases con su fecha_realizada individual
             trabajadores_html = ""
             for t in g["trabajadores"]:
                 fr = t.get("fecha_realizada")
@@ -885,7 +867,6 @@ def admin_asignacion_tarea():
                     f'</div>'
                 )
 
-            # Fecha realizada: mostramos la del primer trabajador en la columna rápida
             first_fr = g["trabajadores"][0].get("fecha_realizada") if g["trabajadores"] else None
             fecha_realizada_str = (
                 first_fr.strftime("%d/%m/%Y") if hasattr(first_fr, "strftime") else str(first_fr)
@@ -921,7 +902,6 @@ def admin_asignacion_tarea():
                 with col6:
                     multi_fr = len(g["trabajadores"]) > 1
                     if multi_fr:
-                        # Con varios trabajadores mostramos un indicador más compacto
                         st.markdown(
                             f"<span style='color:rgba(255,255,255,0.5);font-size:10px;'>"
                             f"ver trabajadores →</span>",
@@ -981,7 +961,7 @@ def admin_asignacion_tarea():
                         else:
                             try:
                                 _actualizar_asignacion_grupo(aid, datos)
-                                st.session_state.asig_msg       = ("ok", f"✅ Asignación #{aid} actualizada (todos los trabajadores del grupo).")
+                                st.session_state.asig_msg       = ("ok", f"✅ Asignación #{aid} actualizada.")
                                 st.session_state.asig_modo      = None
                                 st.session_state.asig_id_editar = None
                                 st.session_state.asig_pagina_actual = 1

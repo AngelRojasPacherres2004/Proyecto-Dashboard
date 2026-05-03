@@ -42,18 +42,10 @@ LAYOUT_BASE = dict(
 # ================================================================
 #  CONSULTAS A LA BASE DE DATOS
 # ================================================================
-
 def _get_stats_generales():
-    """
-    Retorna en una sola consulta:
-    - total usuarios, activos/inactivos por rol
-    - total empresas activas/inactivas
-    - total asignaciones por estado
-    """
     conn = get_connection()
     cur = conn.cursor()
 
-    # Usuarios
     cur.execute("""
         SELECT rol,
                COUNT(*) AS total,
@@ -64,7 +56,6 @@ def _get_stats_generales():
     """)
     usuarios = cur.fetchall()
 
-    # Empresas
     cur.execute("""
         SELECT COUNT(*) AS total,
                SUM(CASE WHEN estado_contrato = 'Activo' THEN 1 ELSE 0 END) AS activas,
@@ -73,7 +64,6 @@ def _get_stats_generales():
     """)
     empresas = cur.fetchone()
 
-    # Asignaciones
     cur.execute("""
         SELECT COUNT(*) AS total,
                SUM(CASE WHEN estado = 'pendiente'  THEN 1 ELSE 0 END) AS pendientes,
@@ -87,9 +77,7 @@ def _get_stats_generales():
     conn.close()
     return usuarios, empresas, asignaciones
 
-
 def _get_tareas_por_estado():
-    """Distribución de asignaciones por estado."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
@@ -102,20 +90,15 @@ def _get_tareas_por_estado():
     cur.close(); conn.close()
     return rows
 
-
 def _get_carga_por_usuario():
-    """
-    Cantidad de asignaciones (pendientes + vencidas) por usuario.
-    Útil para ver quién tiene más carga de trabajo activa.
-    """
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         SELECT u.nom_res AS nombre,
                COUNT(*) AS total,
-               SUM(CASE WHEN a.estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
+               SUM(CASE WHEN a.estado = 'pendiente'  THEN 1 ELSE 0 END) AS pendientes,
                SUM(CASE WHEN a.estado = 'completada' THEN 1 ELSE 0 END) AS completadas,
-               SUM(CASE WHEN a.estado = 'vencida'   THEN 1 ELSE 0 END) AS vencidas
+               SUM(CASE WHEN a.estado = 'vencida'    THEN 1 ELSE 0 END) AS vencidas
         FROM asignaciones a
         JOIN usuarios u ON a.usuario_id = u.id
         GROUP BY u.id, u.nom_res
@@ -125,10 +108,7 @@ def _get_carga_por_usuario():
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
-
-
 def _get_tareas_por_empresa():
-    """Cuántas asignaciones tiene cada empresa, desglosado por estado."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
@@ -146,16 +126,11 @@ def _get_tareas_por_empresa():
     cur.close(); conn.close()
     return rows
 
-
 def _get_completadas_por_mes():
-    """
-    Tareas completadas agrupadas por mes (año-mes).
-    Muestra la tendencia histórica de productividad.
-    """
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT DATE_FORMAT(fecha_meta, '%Y-%m') AS mes,
+        SELECT TO_CHAR(fecha_meta, 'YYYY-MM') AS mes,
                COUNT(*) AS completadas
         FROM asignaciones
         WHERE estado = 'completada'
@@ -166,9 +141,7 @@ def _get_completadas_por_mes():
     cur.close(); conn.close()
     return rows
 
-
 def _get_empresas_por_regimen():
-    """Empresas activas agrupadas por régimen tributario."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
@@ -183,12 +156,7 @@ def _get_empresas_por_regimen():
     cur.close(); conn.close()
     return rows
 
-
 def _get_tareas_por_proyecto():
-    """
-    Cuántas asignaciones tiene cada proyecto (DJ vs PLAME),
-    desglosado por estado.
-    """
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
@@ -205,11 +173,7 @@ def _get_tareas_por_proyecto():
     cur.close(); conn.close()
     return rows
 
-
 def _get_vencimiento_proximo():
-    """
-    Asignaciones pendientes cuya fecha_meta vence en los próximos 15 días.
-    """
     conn = get_connection()
     cur = conn.cursor()
     hoy = datetime.now().date()
@@ -219,7 +183,7 @@ def _get_vencimiento_proximo():
                e.alias AS empresa,
                t.nombre_tarea AS tarea,
                a.fecha_meta,
-               DATEDIFF(a.fecha_meta, CURDATE()) AS dias_restantes
+               (a.fecha_meta - CURRENT_DATE) AS dias_restantes
         FROM asignaciones a
         JOIN usuarios u ON a.usuario_id = u.id
         JOIN empresas e ON a.empresa_id = e.id
@@ -232,7 +196,6 @@ def _get_vencimiento_proximo():
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
-
 
 # ================================================================
 #  FUNCIÓN PRINCIPAL
@@ -435,7 +398,7 @@ def _render_dashboard():
                 return "background-color:#F6C27D; color:#7a4000"
             return ""
 
-        styled = df.style.applymap(_color_dias, subset=["Días Restantes"])
+        styled = df.style.map(_color_dias, subset=["Días Restantes"])
         st.dataframe(styled, use_container_width=True, hide_index=True)
     else:
         st.success("✅ No hay asignaciones pendientes por vencer en los próximos 15 días.")

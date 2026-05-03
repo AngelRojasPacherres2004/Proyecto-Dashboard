@@ -33,8 +33,8 @@ def _get_detalle_asignacion(asignacion_id):
             e.razon_social as empresa, e.ruc,
             t.nombre_tarea as tarea,
             u.nom_res as encargado,
-            YEAR(a.fecha_meta) as anio,
-            MONTHNAME(a.fecha_meta) as mes,
+            EXTRACT(YEAR FROM a.fecha_meta)::integer as anio,
+            TO_CHAR(a.fecha_meta, 'TMMonth') as mes,
             a.usuario_id, a.tarea_id, a.empresa_id
         FROM asignaciones a
         JOIN empresas e ON a.empresa_id = e.id

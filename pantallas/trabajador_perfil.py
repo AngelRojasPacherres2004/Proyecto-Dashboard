@@ -59,7 +59,7 @@ def _get_user_performance_stats(uid):
         cur.execute("""
             SELECT COUNT(*) as total 
             FROM asignaciones 
-            WHERE usuario_id = %s AND DATE(fecha_meta) = CURDATE()
+            WHERE usuario_id = %s AND fecha_meta::date = CURRENT_DATE
         """, (uid,))
         row_hoy = cur.fetchone()
         # Acceso seguro para el conteo
@@ -69,7 +69,8 @@ def _get_user_performance_stats(uid):
         cur.execute("""
             SELECT COUNT(*) as total 
             FROM asignaciones 
-            WHERE usuario_id = %s AND YEARWEEK(fecha_meta, 1) = YEARWEEK(CURDATE(), 1)
+            WHERE usuario_id = %s 
+AND DATE_TRUNC('week', fecha_meta) = DATE_TRUNC('week', CURRENT_DATE)
         """, (uid,))
         row_sem = cur.fetchone()
         semana = row_sem['total'] if isinstance(row_sem, dict) else (row_sem[0] if row_sem else 0)
@@ -88,8 +89,8 @@ def _get_user_performance_stats(uid):
                 END) as promedio
             FROM registros_tareas 
             WHERE usuario_id = %s 
-            AND MONTH(fecha_realizada) = MONTH(CURDATE()) 
-            AND YEAR(fecha_realizada) = YEAR(CURDATE())
+            AND EXTRACT(MONTH FROM fecha_realizada) = EXTRACT(MONTH FROM CURRENT_DATE)
+AND EXTRACT(YEAR FROM fecha_realizada) = EXTRACT(YEAR FROM CURRENT_DATE)
         """, (uid,))
         res_mes = cur.fetchone()
 
