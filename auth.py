@@ -55,7 +55,7 @@ def login():
         st.markdown("""
             <div class="login-hero">
                 <div style="background:rgba(255, 201, 126, 0.14); color:#ffd8a5; padding:0.4rem 1rem; border-radius:20px; display:inline-block; font-size:0.8rem; font-weight:800; margin-bottom:1rem;">SYSTEM OS // v2.0</div>
-                <h1 class="login-title">Gestión de Proyectos</h1>
+                <h1 class="login-title">Gestión de Tareas</h1>
                 <p style="color:rgba(255,255,255,0.8); margin-bottom:2rem;">Acceso centralizado para el control operativo y seguimiento de tareas en tiempo real.</p>
                 <div class="login-point"><strong>Seguimiento centralizado</strong><br>Tareas y responsables en un solo lugar.</div>
                 <div class="login-point"><strong>Acceso por roles</strong><br>Vistas optimizadas para cada usuario.</div>

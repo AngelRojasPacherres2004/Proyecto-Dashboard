@@ -50,7 +50,7 @@ def render_trabajador_dashboard(user):
     page_header("Panel de Trabajador", f"Bienvenido, {user.get('alias', 'Trabajador')}")
 
     # ================= TAREAS PENDIENTES =================
-    section_header("Tareas Pendientes", "Actividades actuales", "📋")
+    section_header("Tareas Pendientes", "Actividades actuales", "-")
 
     # Obtener tareas reales de la base de datos
     tareas_pendientes = get_tareas_pendientes_usuario(user.get("id"))
@@ -68,7 +68,7 @@ def render_trabajador_dashboard(user):
     st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
 
     for tarea in tareas_pendientes:
-        estado_icono = {"pendiente": "⏳", "en progreso": "🔄", "completada": "✅"}.get(tarea["estado"].lower(), "⏳")
+        estado_icono = {"pendiente": "", "en progreso": "🔄", "completada": "✅"}.get(tarea["estado"].lower(), "⏳")
         fecha_fmt = tarea['fecha_limite'].strftime("%d/%m/%Y") if hasattr(tarea['fecha_limite'], 'strftime') else tarea['fecha_limite']
         
         hoy = datetime.now().date()
@@ -88,16 +88,16 @@ def render_trabajador_dashboard(user):
                 """, unsafe_allow_html=True)
             
             with col2:
-                st.markdown(f"<span style='color:#85B7EB; font-size:13px; font-weight:500;'>🏢 {tarea['empresa']}</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='color:#85B7EB; font-size:13px; font-weight:500;'> {tarea['empresa']}</span>", unsafe_allow_html=True)
             
             with col3:
-                st.markdown(f"<span style='color:{fecha_color}; font-size:13px;'>📅 {fecha_fmt}{alerta_vencido}</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='color:{fecha_color}; font-size:13px;'> {fecha_fmt}{alerta_vencido}</span>", unsafe_allow_html=True)
             
             with col4:
                 st.markdown(_badge_estado_tarea(tarea['estado']), unsafe_allow_html=True)
             
             with col5:
-                if st.button("🔎 Ver", key=f"btn_det_{tarea['id']}", use_container_width=True):
+                if st.button(" Ver", key=f"btn_det_{tarea['id']}", use_container_width=True):
                     st.session_state.tarea_seleccionada_id = tarea['id']
                     st.session_state.vista_actual = "detalle"
                     st.rerun()

@@ -673,7 +673,7 @@ def admin_asignacion_tarea():
     # ── TAB LISTA DE ASIGNACIONES ───────────────────────────────
     with tab_lista:
 
-        st.markdown("### 🔍 Filtros")
+        st.markdown("###  Filtros")
 
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:

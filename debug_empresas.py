@@ -1,4 +1,4 @@
-s#!/usr/bin/env python
+
 """Script de diagnóstico para admin_empresas"""
 
 import sys

@@ -53,7 +53,7 @@ def trabajador_sidebar(user):
     with st.sidebar:
         st.markdown(f"""
             <div class="sb-header">
-                <div class="sb-logo">👷‍♂️</div>
+                <div class="sb-logo"></div>
                 <div class="sb-name">Acciones Rápidas</div>
                 <div class="sb-role">Funciones comunes</div>
             </div>
@@ -62,7 +62,7 @@ def trabajador_sidebar(user):
         if "menu_trabajador" not in st.session_state:
             st.session_state.menu_trabajador = "Inicio"
 
-        if st.button(" 📋 Mis Tareas", use_container_width=True, key="sb_home", 
+        if st.button("  Mis Tareas", use_container_width=True, key="sb_home", 
                      type="primary" if st.session_state.menu_trabajador == "Inicio" else "secondary"):
             st.session_state.menu_trabajador = "Inicio"
             st.rerun()

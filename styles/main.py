@@ -118,7 +118,7 @@ def get_admin_style():
 
     /* ================= SIDEBAR ================= */
     section[data-testid="stSidebar"] > div:first-child {{
-        background: rgba(8, 9, 14, 0.7) !important;
+        background: rgba(35, 38, 50, 0.85) !important;
         backdrop-filter: blur(25px);
         border-right: 1px solid rgba(255,255,255,0.05);
         padding-top: 0 !important;

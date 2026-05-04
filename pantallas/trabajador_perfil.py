@@ -215,7 +215,7 @@ def trabajador_perfil():
 
     # --- SECCIÓN DE RENDIMIENTO ---
     st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-    section_header("Mi Rendimiento", "Tus estadísticas del mes actual", "📊")
+    section_header("Mi Rendimiento", "Tus estadísticas del mes actual", "-")
     
     stats = _get_user_performance_stats(user_id)
     
