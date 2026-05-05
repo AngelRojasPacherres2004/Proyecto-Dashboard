@@ -18,11 +18,12 @@ def admin_sidebar(user):
 
         # ================= MENU =================
         opciones = {
-            "Dashboard": "",
-            "Usuarios":  "",
-            "Empresas":  "",
-            "Asignaciones": "",
-        }
+    "Dashboard":    "",
+    "Usuarios":     "",
+    "Empresas":     "",
+    "Tareas":       "",
+    "Asignaciones": "",
+}
 
         if "menu_activo" not in st.session_state:
             st.session_state.menu_activo = "Dashboard"
