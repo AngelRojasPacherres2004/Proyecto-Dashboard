@@ -278,7 +278,17 @@ def _render_dashboard():
                 hole=0.45,
             )
             fig.update_traces(textposition="outside", textinfo="percent+label")
-            fig.update_layout(**LAYOUT_BASE, showlegend=False)
+            fig.update_layout(
+                **LAYOUT_BASE,
+                showlegend=False,
+                title={
+                    'y': 0.95,
+                    'x': 0, 
+                    'xanchor': 'left',
+                    'yanchor': 'top'
+                }
+            )
+            fig.update_layout(margin=dict(t=80, b=10, l=10, r=10))
             st.plotly_chart(fig, use_container_width=True)
 
     with col2:
@@ -303,8 +313,9 @@ def _render_dashboard():
                 barmode="stack",
                 xaxis_title="Asignaciones",
                 yaxis_title="",
-                legend=dict(orientation="h", y=-0.15),
+                legend=dict(orientation="h", y=-0.35, x=0.5, xanchor='center'),
             )
+            fig.update_layout(margin=dict(t=80, b=70, l=10, r=10)) # Aumentar margen superior e inferior
             st.plotly_chart(fig, use_container_width=True)
 
     # ── Fila 2: Tareas por empresa + Régimen tributario ─────────

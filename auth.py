@@ -48,7 +48,7 @@ def login():
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="login-shell">', unsafe_allow_html=True)
-    col_hero, col_card = st.columns([1.05, 0.95], gap="large")
+    col_card, col_hero = st.columns([0.95, 1.05], gap="large")
 
     # ===== HERO IZQUIERDO =====
     with col_hero:
