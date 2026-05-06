@@ -279,20 +279,15 @@ def _calcular_rendimiento(fecha_realizada, fecha_meta):
         return "MEDIO"
     else:
         return "BAJO"
-
 def _insertar_asignacion_bulk(usuario_id, empresa_id, tarea_id, fecha_meta, fecha_realizada, rendimiento):
     conn = get_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT get_next_asignacion_id()")
-        nuevo_id = cur.fetchone()[0]
-
-        if not nuevo_id or nuevo_id == 0:
-            raise ValueError(f"No se pudo obtener un ID válido: {nuevo_id}")
+        cur.execute("SELECT get_next_asignacion_id() AS nuevo_id")
+        nuevo_id = cur.fetchone()["nuevo_id"]
 
         cur.execute("""
             INSERT INTO asignaciones (id, usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
-            OVERRIDING SYSTEM VALUE
             VALUES (%s, %s, %s, %s, %s, 'completada', 1)
         """, (nuevo_id, usuario_id, empresa_id, tarea_id, fecha_meta))
 
@@ -303,11 +298,14 @@ def _insertar_asignacion_bulk(usuario_id, empresa_id, tarea_id, fecha_meta, fech
 
         conn.commit()
         return True, None
+
     except Exception as ex:
         conn.rollback()
         return False, str(ex)
+
     finally:
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
 # ================================================================
 #  HELPERS UI
 # ================================================================

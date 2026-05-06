@@ -10,7 +10,7 @@ from pantallas.admin_usuarios import admin_usuarios
 from pantallas.admin_empresas import admin_empresas
 from pantallas.admin_asignacion_tareas import admin_asignacion_tarea
 from pantallas.admin_radmin_cronograma import admin_radmin_cronograma
-
+from pantallas.admin_tareas import admin_tareas
 
 # ================================================================
 #  PALETA DE COLORES CONSISTENTE
@@ -235,6 +235,8 @@ def admin_home():
 
     elif opcion == "RAdmin Cronograma":
         admin_radmin_cronograma()
+    elif opcion == "Tareas":
+        admin_tareas()
 
 
 # ================================================================
