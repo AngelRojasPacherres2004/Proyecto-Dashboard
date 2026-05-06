@@ -9,6 +9,7 @@ from config.db import get_connection
 from pantallas.admin_usuarios import admin_usuarios
 from pantallas.admin_empresas import admin_empresas
 from pantallas.admin_asignacion_tareas import admin_asignacion_tarea
+from pantallas.admin_radmin_cronograma import admin_radmin_cronograma
 
 
 # ================================================================
@@ -231,6 +232,9 @@ def admin_home():
 
     elif opcion == "Asignaciones":
         admin_asignacion_tarea()
+
+    elif opcion == "RAdmin Cronograma":
+        admin_radmin_cronograma()
 
 
 # ================================================================

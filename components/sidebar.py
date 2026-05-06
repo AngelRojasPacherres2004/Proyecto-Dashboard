@@ -22,6 +22,7 @@ def admin_sidebar(user):
             "Usuarios":  "",
             "Empresas":  "",
             "Asignaciones": "",
+            "RAdmin Cronograma": "",
         }
 
         if "menu_activo" not in st.session_state:
