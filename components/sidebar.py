@@ -22,7 +22,7 @@ def admin_sidebar(user):
             "Usuarios":  "",
             "Empresas":  "",
             "Asignaciones": "",
-            "RAdmin Cronograma": "",
+            "Cronograma": "",
             "Tareas": "",
         }
 
