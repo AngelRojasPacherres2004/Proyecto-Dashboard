@@ -1,968 +1,695 @@
 import streamlit as st
-import pandas as pd
-import calendar
-import re
-import hashlib
-from datetime import date
 from config.db import get_connection
-from pypdf import PdfReader
+from datetime import date
+import calendar
+import pdfplumber
+import io
+
+# ================================================================
+#  CONSTANTES
+# ================================================================
+
+MESES_ES = {
+    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+}
+
+MESES_ABREV = {
+    "ene": 1, "feb": 2, "mar": 3, "abr": 4,
+    "may": 5, "jun": 6, "jul": 7, "ago": 8,
+    "set": 9, "sep": 9, "oct": 10, "nov": 11, "dic": 12,
+}
+
+DIAS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+
+COL_GRUPOS = {
+    1: 0,
+    2: 1,
+    3: "2y3",
+    4: "4y5",
+    5: "6y7",
+    6: "8y9",
+    7: "bc",
+}
 
 
-# ─────────────────────────────────────────────────────────────
-#  DB helpers
-# ─────────────────────────────────────────────────────────────
+# ================================================================
+#  PARSER PDF SUNAT
+# ================================================================
 
-def _ensure_table():
+def _parsear_fecha_celda(celda: str, anio_base: int):
+    if not celda:
+        return None
+    partes = [p.strip().lower() for p in celda.replace("\n", " ").split()]
+    try:
+        dia  = int(partes[0])
+        mes  = MESES_ABREV.get(partes[1][:3])
+        anio = int(partes[2]) if len(partes) >= 3 else anio_base
+        if mes:
+            return date(anio, mes, dia)
+    except Exception:
+        pass
+    return None
+
+
+def _parsear_periodo(texto: str):
+    if not texto:
+        return None, None
+    partes = texto.strip().lower().split("-")
+    if len(partes) != 2:
+        return None, None
+    mes  = MESES_ABREV.get(partes[0][:3])
+    try:
+        anio = int(partes[1])
+    except ValueError:
+        return None, None
+    return anio, mes
+
+
+def _leer_cronograma_pdf(pdf_bytes: bytes) -> dict:
+    resultado = {}
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for tabla in tables:
+                for fila in tabla:
+                    if not fila or not fila[0]:
+                        continue
+                    periodo_txt = fila[0].strip()
+                    anio_per, mes_per = _parsear_periodo(periodo_txt)
+                    if not anio_per or not mes_per:
+                        continue
+
+                    anio_venc_base = anio_per if mes_per < 12 else anio_per + 1
+
+                    fila_fechas = {}
+                    for col_idx, grupo in COL_GRUPOS.items():
+                        if col_idx < len(fila) and fila[col_idx]:
+                            fecha = _parsear_fecha_celda(fila[col_idx], anio_venc_base)
+                            if fecha:
+                                fila_fechas[grupo] = fecha
+
+                    if fila_fechas:
+                        resultado[(anio_per, mes_per)] = fila_fechas
+
+    return resultado
+
+
+# ================================================================
+#  HELPERS RUC -> GRUPO
+# ================================================================
+
+def _get_digito_grupo(ruc: str):
+    if not ruc or len(ruc) < 1:
+        return None
+    d = int(ruc[-1])
+    if d == 0:       return 0
+    if d == 1:       return 1
+    if d in (2, 3):  return "2y3"
+    if d in (4, 5):  return "4y5"
+    if d in (6, 7):  return "6y7"
+    if d in (8, 9):  return "8y9"
+    return None
+
+
+def _get_fecha_vencimiento_from_cron(ruc: str, cronograma: dict, anio: int, mes: int):
+    grupo  = _get_digito_grupo(ruc)
+    fechas = cronograma.get((anio, mes), {})
+    return fechas.get(grupo)
+
+
+# ================================================================
+#  REPOSITORIO
+# ================================================================
+
+def _get_empresas_activas():
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS radmin_cronograma (
-            id BIGSERIAL PRIMARY KEY,
-            empresa_id BIGINT NULL REFERENCES empresas(id),
-            tipo_tarea TEXT NOT NULL DEFAULT 'PLAME',
-            mes_vencimiento SMALLINT NOT NULL DEFAULT 1,
-            ruc_ultimo_digito SMALLINT NULL,
-            tarea_planeada TEXT NOT NULL,
-            fecha_objetivo DATE NOT NULL,
-            prioridad SMALLINT NOT NULL DEFAULT 1,
-            notas TEXT NULL,
-            archivo_nombre TEXT NULL,
-            archivo_data BYTEA NULL,
-            estado TEXT NOT NULL DEFAULT 'pendiente_plan',
-            created_at TIMESTAMP NOT NULL DEFAULT NOW()
-        );
-        """
-    )
-    cur.execute("ALTER TABLE radmin_cronograma ADD COLUMN IF NOT EXISTS empresa_id BIGINT NULL REFERENCES empresas(id)")
-    cur.execute("ALTER TABLE radmin_cronograma ADD COLUMN IF NOT EXISTS tipo_tarea TEXT NOT NULL DEFAULT 'PLAME'")
-    cur.execute("ALTER TABLE radmin_cronograma ADD COLUMN IF NOT EXISTS mes_vencimiento SMALLINT NOT NULL DEFAULT 1")
-    cur.execute("ALTER TABLE radmin_cronograma ADD COLUMN IF NOT EXISTS ruc_ultimo_digito SMALLINT NULL")
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS radmin_vencimientos (
-            id BIGSERIAL PRIMARY KEY,
-            tipo_tarea TEXT NOT NULL,
-            mes SMALLINT NOT NULL,
-            ruc_ultimo_digito SMALLINT NOT NULL,
-            dia_vencimiento SMALLINT NOT NULL,
-            pdf_nombre TEXT NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-            UNIQUE (tipo_tarea, mes, ruc_ultimo_digito)
-        );
-        """
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def _insert_item(tarea, fecha_objetivo, prioridad, notas=None,
-                 empresa_id=None, tipo_tarea="PLAME", mes_vencimiento=1, ruc_ultimo_digito=None,
-                 archivo_nombre=None, archivo_data=None):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO radmin_cronograma
-        (empresa_id, tipo_tarea, mes_vencimiento, ruc_ultimo_digito, tarea_planeada, fecha_objetivo, prioridad, notas, archivo_nombre, archivo_data, estado)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pendiente_plan')
-        """,
-        (empresa_id, tipo_tarea, mes_vencimiento, ruc_ultimo_digito, tarea, fecha_objetivo, prioridad, notas, archivo_nombre, archivo_data),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def _list_items():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, tarea_planeada, fecha_objetivo, prioridad, notas,
-               archivo_nombre, estado, created_at, tipo_tarea, empresa_id, mes_vencimiento, ruc_ultimo_digito
-        FROM radmin_cronograma
-        ORDER BY fecha_objetivo ASC, id DESC
-        """
-    )
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT id, razon_social, alias, ruc
+        FROM empresas
+        WHERE estado_contrato = 'Activo'
+        ORDER BY razon_social
+    """)
     rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    cur.close(); conn.close()
     return rows
 
 
-def _get_tareas_por_empresa(empresa_id: int):
+def _get_usuarios_activos():
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, tarea_planeada, fecha_objetivo, prioridad, notas, tipo_tarea, mes_vencimiento, estado
-        FROM radmin_cronograma
-        WHERE empresa_id = %s
-        ORDER BY fecha_objetivo ASC
-        """,
-        (empresa_id,)
-    )
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT id, nom_res, alias
+        FROM usuarios
+        WHERE estado = 'activo' AND rol = 'trabajador'
+        ORDER BY nom_res
+    """)
     rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    cur.close(); conn.close()
     return rows
 
 
-def _delete_item(item_id: int):
+def _get_tareas():
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM radmin_cronograma WHERE id = %s", (item_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def _delete_all_tareas(tipo_tarea: str = None):
-    conn = get_connection()
-    cur = conn.cursor()
-    if tipo_tarea:
-        cur.execute("DELETE FROM radmin_cronograma WHERE tipo_tarea = %s", (tipo_tarea,))
-    else:
-        cur.execute("DELETE FROM radmin_cronograma")
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def _get_empresas():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, razon_social, alias, ruc FROM empresas ORDER BY razon_social")
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT t.id, t.nombre_tarea, p.nombre_proyecto
+        FROM tareas t
+        JOIN proyectos p ON t.proyecto_id = p.id
+        ORDER BY p.nombre_proyecto, t.nombre_tarea
+    """)
     rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    cur.close(); conn.close()
     return rows
 
 
-def _get_empresa_by_id(empresa_id: int):
+# ================================================================
+#  FIX: filtra por fecha_vencimiento, NO por periodo_mes/periodo_anio
+# ================================================================
+def _get_cronograma_mes(anio: int, mes: int):
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, razon_social, alias, ruc FROM empresas WHERE id = %s", (empresa_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    return row
-
-
-def _save_vencimiento(tipo_tarea: str, mes: int, digito: int, dia: int, pdf_nombre: str = None):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO radmin_vencimientos (tipo_tarea, mes, ruc_ultimo_digito, dia_vencimiento, pdf_nombre)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (tipo_tarea, mes, ruc_ultimo_digito)
-        DO UPDATE SET dia_vencimiento = EXCLUDED.dia_vencimiento, pdf_nombre = EXCLUDED.pdf_nombre
-        """,
-        (tipo_tarea, mes, digito, dia, pdf_nombre),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def _get_all_vencimientos():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT tipo_tarea, mes, ruc_ultimo_digito, dia_vencimiento, pdf_nombre
-        FROM radmin_vencimientos
-        ORDER BY tipo_tarea, mes, ruc_ultimo_digito
-        """
-    )
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT
+            c.id, c.periodo_mes, c.periodo_anio,
+            c.fecha_vencimiento, c.asignado,
+            e.alias AS empresa, e.ruc, e.id AS empresa_id,
+            t.nombre_tarea AS tarea, t.id AS tarea_id
+        FROM cronograma_pdt c
+        JOIN empresas e ON c.empresa_id = e.id
+        JOIN tareas   t ON c.tarea_id   = t.id
+        WHERE EXTRACT(YEAR  FROM c.fecha_vencimiento) = %s
+          AND EXTRACT(MONTH FROM c.fecha_vencimiento) = %s
+        ORDER BY c.fecha_vencimiento ASC, e.alias ASC
+    """, (anio, mes))
     rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    cur.close(); conn.close()
     return rows
 
 
-def _delete_vencimiento(tipo_tarea: str, mes: int, digito: int):
+def _ya_existe_cronograma(empresa_id, tarea_id, anio, mes) -> bool:
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "DELETE FROM radmin_vencimientos WHERE tipo_tarea = %s AND mes = %s AND ruc_ultimo_digito = %s",
-        (tipo_tarea, mes, digito),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT id FROM cronograma_pdt
+        WHERE empresa_id=%s AND tarea_id=%s AND periodo_anio=%s AND periodo_mes=%s
+        LIMIT 1
+    """, (empresa_id, tarea_id, anio, mes))
+    existe = cur.fetchone() is not None
+    cur.close(); conn.close()
+    return existe
 
 
-def _delete_all_vencimientos(tipo_tarea: str = None):
-    """Elimina todas las reglas de vencimiento (opcionalmente filtradas por tipo)"""
+def _insertar_cronograma_bulk(filas: list):
     conn = get_connection()
-    cur = conn.cursor()
-    if tipo_tarea:
-        cur.execute("DELETE FROM radmin_vencimientos WHERE tipo_tarea = %s", (tipo_tarea,))
-    else:
-        cur.execute("DELETE FROM radmin_vencimientos")
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def _parse_vencimientos_pdf(pdf_file):
-    """
-    Parser exacto para el Cronograma SUNAT.
-    
-    El PDF extrae el texto con día y mes en líneas separadas, ej:
-      "Ene-2026 16\\nFeb\\n17\\nFeb\\n18\\nFeb\\n19\\nFeb\\n20\\nFeb\\n23\\nFeb\\n24\\nFeb"
-    
-    Estructura columnas: dígito 0 | dígito 1 | 2y3 | 4y5 | 6y7 | 8y9 | buenos contrib (ignorado)
-    """
-    text = ""
-    reader = PdfReader(pdf_file)
-    for pg in reader.pages:
-        text += (pg.extract_text() or "") + "\n"
-
-    # Normalizar: pasar todo a una sola línea para facilitar el regex
-    text_flat = text.replace('\n', ' ')
-
-    MES_NUM = {
-        "ene": 1, "feb": 2, "mar": 3, "abr": 4, "may": 5, "jun": 6,
-        "jul": 7, "ago": 8, "set": 9, "sep": 9, "oct": 10, "nov": 11, "dic": 12,
-    }
-
-    # Columna 0→dígito 0, col 1→dígito 1, col 2→dígitos 2y3,
-    # col 3→dígitos 4y5, col 4→dígitos 6y7, col 5→dígitos 8y9
-    # (col 6 = buenos contribuyentes, se ignora)
-    DIGITOS_POR_COL = [[0], [1], [2, 3], [4, 5], [6, 7], [8, 9]]
-
-    # Buscar bloques: "Ene-2026" o "Ene 2026" seguido de 6+ pares (número mes_abrev)
-    PERIODO_RE = re.compile(
-        r'([A-Za-záéíóúÁÉÍÓÚ]{3,4})[.\-\s]*(20\d{2})\s+'
-        r'((?:\d{1,2}\s+[A-Za-záéíóúÁÉÍÓÚ]{2,3}\s*){6,7})',
-        re.IGNORECASE
-    )
-
-    rules = []
-    for m in PERIODO_RE.finditer(text_flat):
-        año = int(m.group(2))
-        pairs = re.findall(r'(\d{1,2})\s+([A-Za-záéíóúÁÉÍÓÚ]{2,3})', m.group(3))
-        # Tomar solo las primeras 6 columnas (ignorar col 7 = buenos contribuyentes)
-        for col_idx, digitos in enumerate(DIGITOS_POR_COL):
-            if col_idx >= len(pairs):
-                break
-            dia_str, mes_str = pairs[col_idx]
-            dia = int(dia_str)
-            mes_num = MES_NUM.get(mes_str[:3].lower())
-            if mes_num and 1 <= dia <= 31:
-                for d in digitos:
-                    rules.append((mes_num, d, dia, año))
-
-    rules = list(set(rules))
-    rules.sort(key=lambda x: (x[0], x[1]))
-    return rules
-
-
-def _generar_tareas_para_empresas(tipo_tarea: str, año: int = None):
-    """
-    Genera una tarea por empresa, por mes, para el tipo de tarea (PLAME/DJ)
-    según las reglas de vencimiento cargadas desde el PDF.
-    Coloca cada empresa en la fecha correspondiente según el último dígito del RUC.
-    """
-    if año is None:
-        año = date.today().year
-
-    reglas = _get_all_vencimientos()
-    reglas = [r for r in reglas if r["tipo_tarea"] == tipo_tarea]
-    if not reglas:
-        return 0
-
-    empresas = _get_empresas()
-    tareas_creadas = 0
-
-    for empresa in empresas:
-        ruc = str(empresa.get("ruc", "")).strip()
-        if not ruc or not ruc[-1].isdigit():
-            continue
-        digito = int(ruc[-1])
-
-        # Buscar reglas que aplican al dígito de esta empresa
-        reglas_empresa = [r for r in reglas if r["ruc_ultimo_digito"] == digito]
-
-        for regla in reglas_empresa:
-            mes = regla["mes"]
-            dia = regla["dia_vencimiento"]
+    cur  = conn.cursor()
+    ok = err = 0
+    errores = []
+    try:
+        for f in filas:
             try:
-                fecha_obj = date(año, mes, dia)
-            except ValueError:
-                continue
-
-            # Verificar si ya existe esta tarea para evitar duplicados
-            conn = get_connection()
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT id FROM radmin_cronograma
-                WHERE empresa_id = %s AND tipo_tarea = %s
-                  AND mes_vencimiento = %s AND fecha_objetivo = %s
-                """,
-                (empresa["id"], tipo_tarea, mes, fecha_obj)
-            )
-            existe = cur.fetchone()
-            cur.close()
-            conn.close()
-
-            if not existe:
-                # El nombre en el calendario es la razón social (o alias si es más corto)
-                alias = empresa.get("alias") or ""
-                nombre_display = alias if alias and len(alias) <= 20 else empresa["razon_social"]
-                nombre_tarea = nombre_display
-
-                _insert_item(
-                    tarea=nombre_tarea,
-                    fecha_objetivo=fecha_obj,
-                    prioridad=7,
-                    notas=(
-                        f"Empresa: {empresa['razon_social']} | "
-                        f"RUC: {ruc} (termina en {digito}) | "
-                        f"Tipo: {tipo_tarea} | "
-                        f"Vencimiento: {fecha_obj.strftime('%d/%m/%Y')}"
-                    ),
-                    empresa_id=empresa["id"],
-                    tipo_tarea=tipo_tarea,
-                    mes_vencimiento=mes,
-                    ruc_ultimo_digito=digito,
-                )
-                tareas_creadas += 1
-
-    return tareas_creadas
+                cur.execute("""
+                    INSERT INTO cronograma_pdt
+                        (tarea_id, empresa_id, periodo_mes, periodo_anio, fecha_vencimiento)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (f["tarea_id"], f["empresa_id"],
+                      f["periodo_mes"], f["periodo_anio"],
+                      f["fecha_vencimiento"]))
+                ok += 1
+            except Exception as ex:
+                errores.append(str(ex))
+                err += 1
+        conn.commit()
+    except Exception as ex:
+        conn.rollback()
+        errores.append(str(ex))
+    finally:
+        cur.close(); conn.close()
+    return ok, err, errores
 
 
-# ─────────────────────────────────────────────────────────────
-#  Color helper para empresas (colores únicos por empresa)
-# ─────────────────────────────────────────────────────────────
+def _asignar_desde_cronograma(cronograma_id, usuario_ids, empresa_id, tarea_id, fecha_vencimiento, peso=1):
+    conn = get_connection()
+    cur  = conn.cursor()
+    try:
+        cur.execute("SELECT get_next_asignacion_id() AS nuevo_id")
+        nuevo_id = cur.fetchone()["nuevo_id"]
 
-def _get_empresa_color(empresa_id: int) -> str:
-    hash_val = int(hashlib.md5(str(empresa_id).encode()).hexdigest()[:8], 16)
-    hue = hash_val % 360
-    saturation = 55 + (hash_val % 30)
-    lightness = 50 + (hash_val % 15)
-    return f"hsl({hue}, {saturation}%, {lightness}%)"
+        for uid in usuario_ids:
+            cur.execute("""
+                INSERT INTO asignaciones
+                    (id, usuario_id, empresa_id, tarea_id, fecha_meta, estado, peso)
+                OVERRIDING SYSTEM VALUE
+                VALUES (%s, %s, %s, %s, %s, 'pendiente', %s)
+            """, (nuevo_id, uid, empresa_id, tarea_id, fecha_vencimiento, peso))
 
-
-def _get_contrast_text_color(bg_hsl: str) -> str:
-    match = re.search(r'hsl\([\d.]+, [\d.]+%, ([\d.]+)%', bg_hsl)
-    if match:
-        lightness = float(match.group(1))
-        return "#ffffff" if lightness < 60 else "#1a1a2e"
-    return "#ffffff"
-
-
-# ─────────────────────────────────────────────────────────────
-#  Calendar HTML builder
-# ─────────────────────────────────────────────────────────────
-
-MONTH_NAMES_ES = [
-    "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-]
-DAYS_HEADER = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+        cur.execute("UPDATE cronograma_pdt SET asignado=TRUE WHERE id=%s", (cronograma_id,))
+        conn.commit()
+        return True, nuevo_id
+    except Exception as ex:
+        conn.rollback()
+        return False, str(ex)
+    finally:
+        cur.close(); conn.close()
 
 
-def _render_calendar_html(rows, year: int, month: int, dark: bool) -> str:
-    tasks_by_date: dict[date, list] = {}
-    for r in rows:
-        fd = r["fecha_objetivo"]
-        if not isinstance(fd, date):
-            fd = fd.date()
-        tasks_by_date.setdefault(fd, []).append(r)
+# ================================================================
+#  HELPERS UI
+# ================================================================
 
-    cal = calendar.monthcalendar(year, month)
-    today = date.today()
-
-    day_cells_html = ""
-    for week in cal:
-        for day_num in week:
-            if day_num == 0:
-                day_cells_html += '<div class="cal-cell cal-empty"></div>'
-                continue
-
-            current_date = date(year, month, day_num)
-            is_today = current_date == today
-            is_weekend = current_date.weekday() >= 5
-            day_tasks = tasks_by_date.get(current_date, [])
-
-            cell_class = "cal-cell"
-            if is_today:
-                cell_class += " cal-today"
-            elif is_weekend:
-                cell_class += " cal-weekend"
-
-            tasks_html = ""
-            for t in day_tasks:
-                empresa_id = t.get("empresa_id")
-                if empresa_id:
-                    bg_color = _get_empresa_color(empresa_id)
-                else:
-                    bg_color = "#888888"
-                text_color = _get_contrast_text_color(bg_color)
-
-                # Mostrar alias o nombre corto en el calendario
-                name = t["tarea_planeada"]
-                name_short = name[:18] + "…" if len(name) > 18 else name
-                tipo = t.get("tipo_tarea", "")
-                fecha_str = t["fecha_objetivo"].strftime("%d/%m/%Y") if hasattr(t["fecha_objetivo"], "strftime") else str(t["fecha_objetivo"])
-
-                tasks_html += (
-                    f'<div class="cal-task" style="'
-                    f'background:{bg_color};'
-                    f'color:{text_color};'
-                    f'" title="{name} | {tipo} | vence {fecha_str}">'
-                    f'<span class="cal-task-tipo">{tipo}</span>'
-                    f'{name_short}'
-                    f'</div>'
-                )
-
-            num_class = "cal-day-num"
-            if is_today:
-                num_class += " cal-day-today-num"
-
-            day_cells_html += (
-                f'<div class="{cell_class}">'
-                f'<div class="{num_class}">{day_num}</div>'
-                f'<div class="cal-tasks-wrap">{tasks_html}</div>'
-                f'</div>'
-            )
-
-    # Estilos CSS según modo oscuro/claro
-    if dark:
-        v = {
-            "bg_page": "transparent", "bg_grid": "#13131f", "bg_cell": "#1a1a2e",
-            "bg_empty": "#111120", "bg_weekend": "#1e1830", "bg_today": "#0e1540",
-            "border_cell": "#252540", "text_month": "#e8e8ff", "text_day": "#9090b8",
-            "text_more": "#6060a0", "header_bg": "#0d0d1a", "header_text": "rgba(246,194,125,0.9)",
-            "header_wknd": "rgba(246,194,125,0.4)", "badge_bg": "#0d0d1a", "badge_text": "#f6c27d",
-            "today_accent": "#5c7cfa", "today_num_bg": "#3d5afe",
-        }
-    else:
-        v = {
-            "bg_page": "transparent", "bg_grid": "#ffffff", "bg_cell": "#ffffff",
-            "bg_empty": "#f8f8fc", "bg_weekend": "#fdf8ff", "bg_today": "#f0f4ff",
-            "border_cell": "#ebebf5", "text_month": "#1a1a2e", "text_day": "#5a5a7a",
-            "text_more": "#9090b0", "header_bg": "#1a1a2e", "header_text": "rgba(246,194,125,0.85)",
-            "header_wknd": "rgba(246,194,125,0.4)", "badge_bg": "#1a1a2e", "badge_text": "#f6c27d",
-            "today_accent": "#3d5afe", "today_num_bg": "#3d5afe",
-        }
-
-    css = f"""
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
-
-.cronograma-root {{
-    font-family: 'DM Sans', sans-serif;
-    padding: 0; margin: 0;
-    background: {v['bg_page']};
-}}
-.cal-header {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    padding: 0 4px;
-    flex-wrap: wrap;
-    gap: 12px;
-}}
-.cal-month-title {{
-    font-size: 28px;
-    font-weight: 600;
-    color: {v['text_month']};
-    letter-spacing: -0.5px;
-}}
-.cal-year-badge {{
-    font-family: 'DM Mono', monospace;
-    font-size: 13px;
-    background: {v['badge_bg']};
-    color: {v['badge_text']};
-    padding: 4px 14px;
-    border-radius: 20px;
-    letter-spacing: 1px;
-}}
-.cal-grid-wrap {{
-    background: {v['bg_grid']};
-    border-radius: 20px;
-    border: 1px solid {v['border_cell']};
-    overflow: hidden;
-    box-shadow: 0 4px 32px rgba(0,0,0,{'0.35' if dark else '0.07'});
-}}
-.cal-days-header {{
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    background: {v['header_bg']};
-}}
-.cal-days-header div {{
-    text-align: center;
-    padding: 14px 0;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.9px;
-    text-transform: uppercase;
-    color: {v['header_text']};
-}}
-.cal-days-header div:nth-child(6),
-.cal-days-header div:nth-child(7) {{
-    color: {v['header_wknd']};
-}}
-.cal-grid {{
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-}}
-.cal-cell {{
-    min-height: 120px;
-    max-height: 220px;
-    padding: 8px 6px 6px;
-    border-right: 1px solid {v['border_cell']};
-    border-bottom: 1px solid {v['border_cell']};
-    background: {v['bg_cell']};
-    transition: background 0.15s;
-    overflow-y: auto;
-    overflow-x: hidden;
-    scrollbar-width: thin;
-    scrollbar-color: {v['border_cell']} transparent;
-}}
-.cal-cell::-webkit-scrollbar {{ width: 3px; }}
-.cal-cell::-webkit-scrollbar-track {{ background: transparent; }}
-.cal-cell::-webkit-scrollbar-thumb {{ background: {v['border_cell']}; border-radius: 2px; }}
-.cal-cell:hover {{ background: {'#1f1f35' if dark else '#fafafe'}; }}
-.cal-cell.cal-empty {{ background: {v['bg_empty']}; }}
-.cal-cell.cal-weekend {{ background: {v['bg_weekend']}; }}
-.cal-cell.cal-today {{
-    background: {v['bg_today']};
-    border-top: 3px solid {v['today_accent']};
-}}
-.cal-day-num {{
-    font-family: 'DM Mono', monospace;
-    font-size: 13px;
-    font-weight: 500;
-    color: {v['text_day']};
-    margin-bottom: 6px;
-    width: 26px; height: 26px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 50%;
-}}
-.cal-day-today-num {{
-    background: {v['today_num_bg']};
-    color: #ffffff !important;
-    font-weight: 600;
-}}
-.cal-weekend .cal-day-num {{ color: {'#7060a8' if dark else '#9c8ab0'}; }}
-.cal-tasks-wrap {{ display: flex; flex-direction: column; gap: 3px; }}
-.cal-task {{
-    border-radius: 6px;
-    padding: 3px 6px;
-    font-size: 11px;
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-    transition: transform 0.1s, opacity 0.1s;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}}
-.cal-task:hover {{
-    transform: scale(1.02);
-    opacity: 0.9;
-}}
-.cal-task-tipo {{
-    font-size: 9px;
-    font-weight: 700;
-    opacity: 0.75;
-    letter-spacing: 0.5px;
-    flex-shrink: 0;
-    background: rgba(0,0,0,0.15);
-    border-radius: 3px;
-    padding: 1px 3px;
-}}
-.cal-more {{
-    font-size: 10px;
-    color: {v['text_more']};
-    padding: 2px 4px;
-    font-weight: 500;
-}}
-"""
-
-    days_row = "".join(f"<div>{d}</div>" for d in DAYS_HEADER)
-
-    html = f"""
-<style>{css}</style>
-<div class="cronograma-root">
-  <div class="cal-header">
-    <div class="cal-month-title">{MONTH_NAMES_ES[month]}</div>
-    <div class="cal-year-badge">{year}</div>
-  </div>
-  <div class="cal-grid-wrap">
-    <div class="cal-days-header">{days_row}</div>
-    <div class="cal-grid">{day_cells_html}</div>
-  </div>
-</div>
-"""
-    return html
+def _badge_asignado(asignado: bool) -> str:
+    if asignado:
+        return '<span style="background:rgba(93,202,165,0.15);color:#5DCAA5;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;">ASIGNADO</span>'
+    return '<span style="background:rgba(246,194,125,0.15);color:#f6c27d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;">PENDIENTE</span>'
 
 
-# ─────────────────────────────────────────────────────────────
-#  Main page
-# ─────────────────────────────────────────────────────────────
+# ================================================================
+#  VISTA PRINCIPAL
+# ================================================================
 
 def admin_radmin_cronograma():
-    _ensure_table()
 
-    today = date.today()
-    if "cal_year" not in st.session_state:
-        st.session_state.cal_year = today.year
-    if "cal_month" not in st.session_state:
-        st.session_state.cal_month = today.month
-    if "dark_mode" not in st.session_state:
-        st.session_state.dark_mode = False
-    if "selected_empresa_id" not in st.session_state:
-        st.session_state.selected_empresa_id = None
+    st.markdown("""
+    <div style="margin-bottom:24px;">
+        <h2 style="color:#f6c27d;font-size:22px;font-weight:800;margin:0;">Cronograma de Tareas</h2>
+        <p style="color:rgba(255,255,255,0.5);font-size:13px;margin-top:4px;">
+            Importa el cronograma SUNAT desde PDF · Vista por fecha de vencimiento · Asigna trabajadores
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    dark = st.session_state.dark_mode
+    for key, val in [
+        ("cron_msg",          None),
+        ("cron_asig_id",      None),
+        ("cron_asig_open",    False),
+        ("cron_preview",      None),
+        ("cron_tarea_id",     None),
+        ("cron_anio_import",  None),
+        ("cron_meses_import", None),
+    ]:
+        if key not in st.session_state:
+            st.session_state[key] = val
 
-    # Estilos de página
-    if dark:
-        page_css = """
-        <style>
-        section[data-testid="stMain"] > div { background: #0d0d1a !important; }
-        .cronograma-page-title { color: #e8e8ff !important; }
-        .cronograma-page-sub   { color: #6060a0 !important; }
-        </style>
-        """
-    else:
-        page_css = """
-        <style>
-        .cronograma-page-title { color: #1a1a2e; }
-        .cronograma-page-sub   { color: #888; }
-        </style>
-        """
+    if st.session_state.cron_msg:
+        tipo, texto = st.session_state.cron_msg
+        (st.success if tipo == "ok" else st.error)(texto)
+        st.session_state.cron_msg = None
 
-    st.markdown(page_css, unsafe_allow_html=True)
+    hoy = date.today()
 
-    # ── Header ──────────────────────────────────────────────
-    h1, h2 = st.columns([8, 1])
-    with h1:
-        st.markdown(
-            '<div class="cronograma-page-title" style="font-size:30px;font-weight:700;'
-            'letter-spacing:-0.5px;margin-bottom:2px;">📋 Cronograma Tributario</div>'
-            '<div class="cronograma-page-sub" style="font-size:14px;margin-bottom:8px;">'
-            'Empresas ubicadas en el calendario según su RUC y fecha de vencimiento SUNAT</div>',
-            unsafe_allow_html=True,
-        )
-    with h2:
-        moon = "🌙" if not dark else "☀️"
-        label = f"{moon} {'Dark' if not dark else 'Light'}"
-        if st.button(label, use_container_width=True):
-            st.session_state.dark_mode = not dark
-            st.rerun()
+    tab_cal, tab_import = st.tabs(["Calendario", "Importar PDF"])
 
-    # ── Panel PDF ────────────────────────────────────────────
-    with st.expander("📄 Cargar calendario SUNAT desde PDF", expanded=not bool(_get_all_vencimientos())):
-        st.markdown(
-            "Al subir el PDF, las empresas se colocarán **automáticamente** en el calendario "
-            "según el último dígito de su RUC y las fechas de vencimiento del PDF."
-        )
-        col_pdf1, col_pdf2 = st.columns(2)
-        with col_pdf1:
-            tipo_pdf = st.selectbox("Tipo de calendario", ["PLAME", "DJ"], key="tipo_pdf_venc")
-            año_pdf = st.number_input(
-                "Año", min_value=2024, max_value=2030,
-                value=today.year, key="año_pdf"
-            )
-        with col_pdf2:
-            pdf_venc = st.file_uploader(
-                "📎 Subir PDF de fechas SUNAT",
-                type=["pdf"],
-                key="pdf_venc_upload"
+    # ================================================================
+    #  TAB IMPORTAR PDF
+    # ================================================================
+    with tab_import:
+        st.markdown("""
+        <div style="background:rgba(93,202,165,0.06);border:1px solid rgba(93,202,165,0.2);
+                    border-radius:16px;padding:20px 24px;margin-bottom:20px;">
+            <h4 style="color:#5DCAA5;margin:0 0 8px;">Importar Cronograma SUNAT desde PDF</h4>
+            <p style="color:rgba(255,255,255,0.5);font-size:12px;margin:0;">
+                Sube el PDF del cronograma SUNAT. El sistema leerá las fechas de vencimiento
+                y las cruzará con el RUC de cada empresa activa.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        tareas  = _get_tareas()
+        tar_map = {f"[{t['nombre_proyecto']}] {t['nombre_tarea']}": t["id"] for t in tareas}
+
+        col1, col2 = st.columns(2)
+        with col1:
+            tar_sel = st.selectbox("Tarea a asignar *", list(tar_map.keys()), key="import_tar")
+        with col2:
+            anio_import = st.selectbox(
+                "Año del cronograma *",
+                options=list(range(2024, 2030)),
+                index=list(range(2024, 2030)).index(hoy.year),
+                key="import_anio"
             )
 
-        if pdf_venc is not None:
-            if st.button("⚡ Cargar PDF y ubicar empresas en el calendario", use_container_width=True, type="primary"):
-                with st.spinner("Leyendo PDF y generando cronograma..."):
-                    try:
-                        # 1. Parsear reglas del PDF
-                        reglas = _parse_vencimientos_pdf(pdf_venc)
-                        if not reglas:
-                            st.error("⚠️ No se detectaron fechas en el PDF. Verifica el formato.")
-                        else:
-                            # Mostrar preview de lo que se leyó
-                            st.markdown(f"**🔍 Vista previa — {len(reglas)} reglas detectadas en el PDF:**")
-                            preview_data = []
-                            for mes_v, dig, dia, año_v in sorted(reglas, key=lambda x: (x[0], x[1])):
-                                preview_data.append({
-                                    "Mes vencimiento": MONTH_NAMES_ES[mes_v],
-                                    "Dígito RUC": dig,
-                                    "Día": dia,
-                                    "Año": año_v,
-                                    "Fecha completa": f"{dia:02d}/{mes_v:02d}/{año_v}"
-                                })
-                            df_preview = pd.DataFrame(preview_data)
-                            st.dataframe(df_preview, use_container_width=True, hide_index=True)
-
-                            # 2. Guardar en BD
-                            for mes_v, dig, dia, año_v in reglas:
-                                _save_vencimiento(tipo_pdf, mes_v, dig, dia, pdf_venc.name)
-                            st.success(f"✅ {len(reglas)} reglas guardadas del PDF «{pdf_venc.name}»")
-
-                            # 3. Generar tareas automáticamente para todas las empresas
-                            tareas_creadas = _generar_tareas_para_empresas(tipo_pdf, int(año_pdf))
-                            if tareas_creadas > 0:
-                                st.success(
-                                    f"🎯 {tareas_creadas} entradas generadas — "
-                                    f"empresas ubicadas en el calendario {tipo_pdf} {int(año_pdf)}"
-                                )
-                            else:
-                                st.info(
-                                    "ℹ️ No se generaron nuevas entradas "
-                                    "(ya existen o no hay empresas con RUC registrado)."
-                                )
-                            st.rerun()
-                    except Exception as ex:
-                        st.error(f"❌ Error procesando el PDF: {ex}")
-
-        # Mostrar reglas actuales cargadas
-        reglas_actuales = _get_all_vencimientos()
-        if reglas_actuales:
-            st.markdown("---")
-
-            col_reglas_title, col_borrar_todo = st.columns([5, 2])
-            with col_reglas_title:
-                st.markdown("**📋 Reglas de vencimiento cargadas:**")
-            with col_borrar_todo:
-                if st.button("🗑️ Borrar TODAS las reglas", use_container_width=True, type="secondary"):
-                    _delete_all_vencimientos()
-                    _delete_all_tareas()
-                    st.success("✅ Todas las reglas y tareas han sido eliminadas")
-                    st.rerun()
-
-            df_reglas = pd.DataFrame(reglas_actuales)
-            df_reglas = df_reglas.rename(columns={
-                "tipo_tarea": "Tipo", "mes": "Mes",
-                "ruc_ultimo_digito": "Último dígito RUC", "dia_vencimiento": "Día vencimiento",
-                "pdf_nombre": "PDF"
-            })
-            df_reglas["Mes"] = df_reglas["Mes"].apply(lambda x: MONTH_NAMES_ES[x])
-            st.dataframe(df_reglas[["Tipo", "Mes", "Último dígito RUC", "Día vencimiento", "PDF"]],
-                         use_container_width=True, hide_index=True)
-
-            st.markdown("**Borrar por tipo:**")
-            col_limpiar1, col_limpiar2, col_limpiar3 = st.columns(3)
-            with col_limpiar1:
-                if st.button("🗑️ Reglas + tareas PLAME", use_container_width=True):
-                    _delete_all_vencimientos("PLAME")
-                    _delete_all_tareas("PLAME")
-                    st.success("✅ Eliminado PLAME")
-                    st.rerun()
-            with col_limpiar2:
-                if st.button("🗑️ Reglas + tareas DJ", use_container_width=True):
-                    _delete_all_vencimientos("DJ")
-                    _delete_all_tareas("DJ")
-                    st.success("✅ Eliminado DJ")
-                    st.rerun()
-            with col_limpiar3:
-                if st.button("🗑️ Solo tareas (mantener reglas)", use_container_width=True):
-                    _delete_all_tareas()
-                    st.success("✅ Tareas eliminadas, reglas conservadas")
-                    st.rerun()
-
-    st.divider()
-
-    # ── Filtro y navegación con selectores desplegables ──────
-    nav_col1, nav_col2, nav_col3 = st.columns([2, 1, 2])
-    with nav_col1:
-        tipo_filtro = st.selectbox(
-            "📌 Tipo de tarea",
-            ["PLAME", "DJ", "TODOS"],
-            index=0,
-            key="tipo_filtro_sel"
+        meses_import = st.multiselect(
+            "Períodos a importar *",
+            options=list(range(1, 13)),
+            default=[hoy.month],
+            format_func=lambda m: MESES_ES[m],
+            key="import_meses"
         )
-    with nav_col2:
-        mes_opciones = {
-            MONTH_NAMES_ES[i]: i for i in range(1, 13)
-        }
-        mes_sel = st.selectbox(
-            "📅 Mes",
-            options=list(mes_opciones.keys()),
-            index=st.session_state.cal_month - 1,
-            key="mes_selector"
+
+        pdf_file = st.file_uploader(
+            "Selecciona el PDF del cronograma SUNAT",
+            type=["pdf"],
+            key="pdf_uploader"
         )
-        if mes_opciones[mes_sel] != st.session_state.cal_month:
-            st.session_state.cal_month = mes_opciones[mes_sel]
-            st.rerun()
-    with nav_col3:
-        año_sel = st.selectbox(
-            "📆 Año",
-            options=list(range(2024, 2031)),
-            index=list(range(2024, 2031)).index(st.session_state.cal_year),
-            key="año_selector"
-        )
-        if año_sel != st.session_state.cal_year:
-            st.session_state.cal_year = año_sel
-            st.rerun()
 
-    # Botones de navegación rápida
-    b1, b2, b3, b4 = st.columns([1, 1, 5, 1])
-    with b1:
-        if st.button("◀ Anterior", use_container_width=True):
-            m, y = st.session_state.cal_month - 1, st.session_state.cal_year
-            if m < 1:
-                m, y = 12, y - 1
-            st.session_state.cal_month, st.session_state.cal_year = m, y
-            st.rerun()
-    with b2:
-        if st.button("Hoy", use_container_width=True):
-            st.session_state.cal_year, st.session_state.cal_month = today.year, today.month
-            st.rerun()
-    with b4:
-        if st.button("Siguiente ▶", use_container_width=True):
-            m, y = st.session_state.cal_month + 1, st.session_state.cal_year
-            if m > 12:
-                m, y = 1, y + 1
-            st.session_state.cal_month, st.session_state.cal_year = m, y
-            st.rerun()
+        if pdf_file and tar_sel and meses_import:
+            if st.button("Leer PDF y generar vista previa", use_container_width=True,
+                         key="btn_leer_pdf"):
+                try:
+                    cronograma_pdf = _leer_cronograma_pdf(pdf_file.read())
+                    empresas       = _get_empresas_activas()
+                    tarea_id       = tar_map[tar_sel]
 
-    # ── Obtener tareas ───────────────────────────────────────
-    rows = _list_items()
-    year = st.session_state.cal_year
-    month = st.session_state.cal_month
+                    filas_preview = []
+                    for mes in sorted(meses_import):
+                        for emp in empresas:
+                            fecha_venc = _get_fecha_vencimiento_from_cron(
+                                emp["ruc"], cronograma_pdf, anio_import, mes
+                            )
+                            if not fecha_venc:
+                                continue
+                            ya_existe = _ya_existe_cronograma(emp["id"], tarea_id, anio_import, mes)
+                            filas_preview.append({
+                                "Período":        f"{MESES_ES[mes]} {anio_import}",
+                                "Empresa":        emp["alias"],
+                                "RUC":            emp["ruc"],
+                                "Últ. dígito":    emp["ruc"][-1] if emp["ruc"] else "?",
+                                "F. Vencimiento": fecha_venc.strftime("%d/%m/%Y"),
+                                "Estado":         "Ya existe" if ya_existe else "Nuevo",
+                                "_empresa_id":    emp["id"],
+                                "_tarea_id":      tarea_id,
+                                "_mes":           mes,
+                                "_anio":          anio_import,
+                                "_fecha":         fecha_venc,
+                                "_existe":        ya_existe,
+                            })
 
-    if tipo_filtro == "TODOS":
-        month_tasks = [
-            r for r in rows
-            if hasattr(r["fecha_objetivo"], "year")
-            and r["fecha_objetivo"].year == year
-            and r["fecha_objetivo"].month == month
-        ]
-    else:
-        month_tasks = [
-            r for r in rows
-            if hasattr(r["fecha_objetivo"], "year")
-            and r["fecha_objetivo"].year == year
-            and r["fecha_objetivo"].month == month
-            and r.get("tipo_tarea") == tipo_filtro
-        ]
+                    st.session_state.cron_preview      = filas_preview
+                    st.session_state.cron_tarea_id     = tarea_id
+                    st.session_state.cron_anio_import  = anio_import
+                    st.session_state.cron_meses_import = meses_import
 
-    # ── Métricas ─────────────────────────────────────────────
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("🏢 Empresas este mes", len(set(r.get("empresa_id") for r in month_tasks if r.get("empresa_id"))))
-    col_m2.metric("📌 Tareas este mes", len(month_tasks))
-    col_m3.metric("⏳ Pendientes", sum(1 for r in month_tasks if r["estado"] == "pendiente_plan"))
-    col_m4.metric("📊 Total general", len(rows))
+                    if not filas_preview:
+                        st.warning("No se encontraron coincidencias entre el PDF y las empresas activas.")
 
-    # ── Calendario ───────────────────────────────────────────
-    st.markdown(
-        f"### 📅 {MONTH_NAMES_ES[month]} {year}"
-        f"{'  —  ' + tipo_filtro if tipo_filtro != 'TODOS' else '  —  Todos los tipos'}"
-    )
-    cal_html = _render_calendar_html(month_tasks, year, month, dark)
-    st.html(cal_html)
+                except Exception as ex:
+                    st.error(f"Error al leer el PDF: {ex}")
 
-    st.divider()
+        if st.session_state.cron_preview:
+            import pandas as pd
+            filas   = st.session_state.cron_preview
+            nuevos  = [f for f in filas if not f["_existe"]]
+            ya_hay  = [f for f in filas if f["_existe"]]
 
-    # ── Lista detallada: empresas del mes agrupadas ──────────
-    st.markdown(f"### 🏢 Empresas con vencimiento en {MONTH_NAMES_ES[month]} {year}")
+            df_prev = pd.DataFrame([
+                {k: v for k, v in f.items() if not k.startswith("_")}
+                for f in filas
+            ])
 
-    if not month_tasks:
-        st.info(
-            "No hay empresas con vencimiento este mes. "
-            "Sube un PDF de SUNAT en el panel de arriba para cargar el cronograma."
-        )
-    else:
-        # Agrupar por empresa
-        empresas_en_mes: dict[int, list] = {}
-        for t in month_tasks:
-            emp_id = t.get("empresa_id")
-            if emp_id:
-                empresas_en_mes.setdefault(emp_id, []).append(t)
+            st.markdown(f"**Vista previa — {len(filas)} registros:**")
+            st.dataframe(df_prev, use_container_width=True, hide_index=True)
 
-        for emp_id, tareas in sorted(empresas_en_mes.items()):
-            empresa = _get_empresa_by_id(emp_id)
-            nombre_empresa = empresa["razon_social"] if empresa else f"Empresa ID {emp_id}"
-            ruc = str(empresa.get("ruc", "")) if empresa else ""
-            digito = ruc[-1] if ruc else "?"
-            color = _get_empresa_color(emp_id)
-            text_color = _get_contrast_text_color(color)
+            ci1, ci2 = st.columns(2)
+            ci1.markdown(f"<span style='color:#5DCAA5;font-size:12px;'>{len(nuevos)} nuevos a insertar</span>", unsafe_allow_html=True)
+            ci2.markdown(f"<span style='color:#f6c27d;font-size:12px;'>{len(ya_hay)} ya existentes (se omitirán)</span>", unsafe_allow_html=True)
 
-            # Badge de color con el nombre
-            badge_html = (
-                f'<span style="background:{color};color:{text_color};'
-                f'border-radius:8px;padding:3px 10px;font-size:13px;font-weight:600;">'
-                f'{nombre_empresa}</span>'
-                f'&nbsp;<span style="color:#888;font-size:12px;">RUC termina en <b>{digito}</b></span>'
+            if nuevos:
+                if st.button("Confirmar importación", type="primary",
+                             use_container_width=True, key="btn_confirmar_import"):
+                    filas_bd = [{
+                        "tarea_id":          f["_tarea_id"],
+                        "empresa_id":        f["_empresa_id"],
+                        "periodo_mes":       f["_mes"],
+                        "periodo_anio":      f["_anio"],
+                        "fecha_vencimiento": f["_fecha"],
+                    } for f in nuevos]
+
+                    ok_c, err_c, errs = _insertar_cronograma_bulk(filas_bd)
+
+                    if ok_c:
+                        st.session_state.cron_msg     = ("ok", f"{ok_c} registros importados correctamente.")
+                        st.session_state.cron_preview = None
+                    if err_c:
+                        st.session_state.cron_msg = ("error", f"{err_c} errores: {' | '.join(errs[:3])}")
+                    st.rerun()
+            else:
+                st.info("Todos los registros ya existen para los períodos seleccionados.")
+
+            if st.button("Limpiar vista previa", key="btn_limpiar_preview"):
+                st.session_state.cron_preview = None
+                st.rerun()
+
+    # ================================================================
+    #  TAB CALENDARIO
+    # ================================================================
+    with tab_cal:
+
+        col_mes, col_anio, col_spacer = st.columns([2, 1, 4])
+        with col_mes:
+            mes_sel = st.selectbox(
+                "Mes",
+                options=list(range(1, 13)),
+                format_func=lambda m: MESES_ES[m],
+                index=hoy.month - 1,
+                key="cron_mes"
+            )
+        with col_anio:
+            anio_sel = st.selectbox(
+                "Año",
+                options=list(range(2024, 2030)),
+                index=list(range(2024, 2030)).index(hoy.year),
+                key="cron_anio"
             )
 
-            with st.container(border=True):
-                col_e1, col_e2 = st.columns([6, 2])
-                with col_e1:
-                    st.markdown(badge_html, unsafe_allow_html=True)
-                    for t in tareas:
-                        fecha_txt = (
-                            t["fecha_objetivo"].strftime("%d/%m/%Y")
-                            if hasattr(t["fecha_objetivo"], "strftime")
-                            else str(t["fecha_objetivo"])
-                        )
-                        tipo_badge = f"`{t.get('tipo_tarea','')}`"
-                        st.markdown(f"  → {tipo_badge} Vence el **{fecha_txt}**")
-                with col_e2:
-                    if st.button(
-                        f"📋 Ver todas las tareas",
-                        key=f"btn_emp_{emp_id}",
-                        use_container_width=True
-                    ):
-                        st.session_state.selected_empresa_id = emp_id
-                        st.rerun()
+        st.markdown("""
+        <div style="background:rgba(133,183,235,0.06);border:1px solid rgba(133,183,235,0.15);
+                    border-radius:10px;padding:10px 14px;margin:8px 0 16px;">
+            <span style="color:#85B7EB;font-size:12px;">
+                El calendario muestra empresas por su <b>fecha de vencimiento</b>.
+                Ej: periodo Enero 2026 vence en Febrero 2026 · periodo Diciembre 2026 vence en Enero 2027.
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # ── Vista de todas las tareas de una empresa ─────────────
-    if st.session_state.selected_empresa_id:
-        empresa = _get_empresa_by_id(st.session_state.selected_empresa_id)
-        if empresa:
-            st.divider()
-            ruc = str(empresa.get("ruc", ""))
-            digito = ruc[-1] if ruc else "?"
-            color = _get_empresa_color(empresa["id"])
-            text_color = _get_contrast_text_color(color)
+        # ✅ QUERY CORREGIDA: usa fecha_vencimiento
+        registros = _get_cronograma_mes(anio_sel, mes_sel)
 
-            st.markdown(
-                f'<div style="background:{color};color:{text_color};border-radius:12px;'
-                f'padding:14px 20px;margin-bottom:12px;">'
-                f'<div style="font-size:20px;font-weight:700;">{empresa["razon_social"]}</div>'
-                f'<div style="font-size:13px;opacity:0.85;">RUC: {ruc} &nbsp;|&nbsp; Último dígito: {digito}</div>'
-                f'</div>',
+        reg_por_dia: dict[int, list] = {}
+        for r in registros:
+            d = r["fecha_vencimiento"].day
+            reg_por_dia.setdefault(d, []).append(r)
+
+        total_reg  = len(registros)
+        asignados  = sum(1 for r in registros if r["asignado"])
+        pendientes = total_reg - asignados
+
+        m1, m2, m3 = st.columns(3)
+        for col, label, val, color in [
+            (m1, "Total empresas", total_reg,  "white"),
+            (m2, "Asignados",      asignados,  "#5DCAA5"),
+            (m3, "Sin asignar",    pendientes, "#f6c27d"),
+        ]:
+            col.markdown(f"""
+            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);
+                        border-radius:12px;padding:12px 16px;margin-bottom:16px;">
+                <div style="color:rgba(255,255,255,0.4);font-size:10px;letter-spacing:1px;
+                            text-transform:uppercase;margin-bottom:4px;">{label}</div>
+                <div style="color:{color};font-size:22px;font-weight:800;">{val}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div style="margin:8px 0 16px;">
+            <span style="color:#f6c27d;font-size:18px;font-weight:800;">
+                {MESES_ES[mes_sel]} {anio_sel}
+            </span>
+            <span style="color:rgba(255,255,255,0.3);font-size:12px;margin-left:8px;">
+                — fechas de vencimiento
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        cols_h = st.columns(7)
+        for i, dia_nombre in enumerate(DIAS_ES):
+            color = "#F09595" if i == 6 else "#f6c27d" if i == 5 else "rgba(255,255,255,0.4)"
+            cols_h[i].markdown(
+                f"<div style='text-align:center;color:{color};font-size:11px;"
+                f"font-weight:700;letter-spacing:1px;padding:8px 0;'>{dia_nombre}</div>",
                 unsafe_allow_html=True
             )
 
-            tareas_empresa = _get_tareas_por_empresa(empresa["id"])
-            if not tareas_empresa:
-                st.info("No hay tareas registradas para esta empresa.")
-            else:
-                df_tareas = pd.DataFrame(tareas_empresa)
-                df_tareas = df_tareas.rename(columns={
-                    "tarea_planeada": "Empresa",
-                    "fecha_objetivo": "Fecha vencimiento",
-                    "tipo_tarea": "Tipo",
-                    "prioridad": "Prioridad",
-                    "estado": "Estado",
-                    "notas": "Notas",
-                    "mes_vencimiento": "Mes"
-                })
-                df_tareas["Fecha vencimiento"] = pd.to_datetime(
-                    df_tareas["Fecha vencimiento"]
-                ).dt.strftime("%d/%m/%Y")
-                df_tareas["Mes"] = df_tareas["Mes"].apply(lambda x: MONTH_NAMES_ES[int(x)])
-                st.dataframe(
-                    df_tareas[["Tipo", "Mes", "Fecha vencimiento", "Estado", "Notas"]],
-                    use_container_width=True,
-                    hide_index=True
-                )
+        primer_dia_semana, dias_en_mes = calendar.monthrange(anio_sel, mes_sel)
+        celdas = [""] * primer_dia_semana + list(range(1, dias_en_mes + 1))
+        while len(celdas) % 7 != 0:
+            celdas.append("")
+        semanas = [celdas[i:i+7] for i in range(0, len(celdas), 7)]
 
-            if st.button("✖ Cerrar vista de empresa"):
-                st.session_state.selected_empresa_id = None
-                st.rerun()
+        for semana in semanas:
+            cols = st.columns(7)
+            for col_idx, dia in enumerate(semana):
+                with cols[col_idx]:
+                    if dia == "":
+                        st.markdown("<div style='min-height:100px;'></div>", unsafe_allow_html=True)
+                        continue
+
+                    es_hoy   = (dia == hoy.day and mes_sel == hoy.month and anio_sel == hoy.year)
+                    es_fin   = col_idx >= 5
+                    regs_dia = reg_por_dia.get(dia, [])
+
+                    num_color = "#f6c27d" if es_hoy else ("#F09595" if es_fin else "rgba(255,255,255,0.7)")
+                    num_bg    = "rgba(246,194,125,0.15)" if es_hoy else "transparent"
+                    borde     = "1px solid rgba(246,194,125,0.4)" if es_hoy else "1px solid rgba(255,255,255,0.06)"
+
+                    chips_html = ""
+                    for r in regs_dia[:3]:
+                        c       = "#5DCAA5" if r["asignado"] else "#f6c27d"
+                        empresa = r["empresa"][:10]
+                        chips_html += (
+                            f'<div style="background:rgba(255,255,255,0.04);border-left:3px solid {c};'
+                            f'padding:2px 5px;border-radius:0 4px 4px 0;margin-bottom:2px;'
+                            f'font-size:9px;color:rgba(255,255,255,0.8);white-space:nowrap;'
+                            f'overflow:hidden;text-overflow:ellipsis;">'
+                            f'{empresa}</div>'
+                        )
+                    if len(regs_dia) > 3:
+                        chips_html += (
+                            f'<div style="color:rgba(255,255,255,0.35);font-size:9px;'
+                            f'padding-left:4px;">+{len(regs_dia)-3} mas</div>'
+                        )
+
+                    hoy_badge = "<span style='color:#f6c27d;font-size:9px;'>HOY</span>" if es_hoy else ""
+                    html_cell = (
+                        f'<div style="background:rgba(255,255,255,0.02);border:{borde};'
+                        f'border-radius:10px;padding:8px 6px;min-height:100px;margin-bottom:4px;">'
+                        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+                        f'<span style="background:{num_bg};color:{num_color};font-size:13px;font-weight:700;'
+                        f'padding:1px 6px;border-radius:6px;">{dia}</span>{hoy_badge}</div>'
+                        f'{chips_html}</div>'
+                    )
+                    st.markdown(html_cell, unsafe_allow_html=True)
+
+        st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+
+        # ================================================================
+        #  TABLA DETALLE + ASIGNAR TRABAJADOR
+        # ================================================================
+        if registros:
+            st.markdown(f"""
+            <div style="margin-bottom:12px;">
+                <span style="color:rgba(255,255,255,0.6);font-size:14px;font-weight:600;">
+                    Vencimientos en {MESES_ES[mes_sel]} {anio_sel}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            cols_h2 = st.columns([0.4, 0.9, 1.1, 0.8, 1, 1, 0.8, 1])
+            for col, h in zip(cols_h2, ["DIA", "PERIODO", "EMPRESA", "RUC", "TAREA", "F. VENC.", "ESTADO", "ACCION"]):
+                col.markdown(
+                    f"<span style='color:rgba(255,255,255,0.4);font-size:10px;"
+                    f"font-weight:700;letter-spacing:1px;'>{h}</span>",
+                    unsafe_allow_html=True
+                )
+            st.divider()
+
+            for r in registros:
+                with st.container(border=True):
+                    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([0.4, 0.9, 1.1, 0.8, 1, 1, 0.8, 1])
+
+                    c1.markdown(
+                        f"<span style='color:#f6c27d;font-weight:700;'>{r['fecha_vencimiento'].day}</span>",
+                        unsafe_allow_html=True
+                    )
+                    c2.markdown(
+                        f"<span style='color:rgba(255,255,255,0.45);font-size:11px;'>"
+                        f"{MESES_ES[r['periodo_mes']]} {r['periodo_anio']}</span>",
+                        unsafe_allow_html=True
+                    )
+                    c3.markdown(
+                        f"<span style='color:white;font-size:12px;'>{r['empresa']}</span>",
+                        unsafe_allow_html=True
+                    )
+                    c4.markdown(
+                        f"<span style='color:rgba(255,255,255,0.5);font-size:11px;'>{r['ruc']}</span>",
+                        unsafe_allow_html=True
+                    )
+                    c5.markdown(
+                        f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{r['tarea']}</span>",
+                        unsafe_allow_html=True
+                    )
+                    c6.markdown(
+                        f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>"
+                        f"{r['fecha_vencimiento'].strftime('%d/%m/%Y')}</span>",
+                        unsafe_allow_html=True
+                    )
+                    c7.markdown(_badge_asignado(r["asignado"]), unsafe_allow_html=True)
+
+                    with c8:
+                        if not r["asignado"]:
+                            if st.button("Asignar", key=f"asig_{r['id']}", use_container_width=True):
+                                st.session_state.cron_asig_id   = r["id"]
+                                st.session_state.cron_asig_open = True
+                                st.rerun()
+                        else:
+                            st.markdown(
+                                "<span style='color:rgba(255,255,255,0.3);font-size:11px;'>listo</span>",
+                                unsafe_allow_html=True
+                            )
+
+                # Panel asignar trabajador
+                if st.session_state.cron_asig_open and st.session_state.cron_asig_id == r["id"]:
+                    st.markdown(f"""
+                    <div style="background:rgba(133,183,235,0.06);border:1px solid rgba(133,183,235,0.2);
+                                border-radius:16px;padding:20px 24px;margin:4px 0 12px;">
+                        <h4 style="color:#85B7EB;margin:0 0 4px;">
+                            Asignar — {r['empresa']}
+                        </h4>
+                        <p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0;">
+                            Periodo: {MESES_ES[r['periodo_mes']]} {r['periodo_anio']} ·
+                            Vence: {r['fecha_vencimiento'].strftime('%d/%m/%Y')}
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    usuarios = _get_usuarios_activos()
+                    usr_map  = {f"{u['nom_res']} ({u['alias']})": u["id"] for u in usuarios}
+
+                    col_u, col_p = st.columns(2)
+                    with col_u:
+                        usr_sel = st.multiselect(
+                            "Trabajador(es) *",
+                            list(usr_map.keys()),
+                            key=f"usr_sel_{r['id']}"
+                        )
+                    with col_p:
+                        peso = st.number_input(
+                            "Peso", min_value=1, max_value=10,
+                            value=1, key=f"peso_sel_{r['id']}"
+                        )
+
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("Confirmar", use_container_width=True,
+                                     type="primary", key=f"confirm_asig_{r['id']}"):
+                            if not usr_sel:
+                                st.session_state.cron_msg = ("error", "Selecciona al menos un trabajador.")
+                            else:
+                                uid_list = [usr_map[n] for n in usr_sel]
+                                ok, result = _asignar_desde_cronograma(
+                                    cronograma_id     = r["id"],
+                                    usuario_ids       = uid_list,
+                                    empresa_id        = r["empresa_id"],
+                                    tarea_id          = r["tarea_id"],
+                                    fecha_vencimiento = r["fecha_vencimiento"],
+                                    peso              = peso,
+                                )
+                                if ok:
+                                    st.session_state.cron_msg       = ("ok", f"Asignacion #{result} creada.")
+                                    st.session_state.cron_asig_open = False
+                                    st.session_state.cron_asig_id   = None
+                                else:
+                                    st.session_state.cron_msg = ("error", f"Error: {result}")
+                            st.rerun()
+                    with b2:
+                        if st.button("Cancelar", use_container_width=True,
+                                     key=f"cancel_asig_{r['id']}"):
+                            st.session_state.cron_asig_open = False
+                            st.session_state.cron_asig_id   = None
+                            st.rerun()
+
+        else:
+            st.info(
+                f"No hay vencimientos en {MESES_ES[mes_sel]} {anio_sel}. "
+                f"Ve a 'Importar PDF' para cargar el cronograma SUNAT."
+            )

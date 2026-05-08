@@ -662,7 +662,7 @@ def admin_asignacion_tarea():
         (st.success if tipo == "ok" else st.error)(texto)
         st.session_state.asig_msg = None
 
-    tab_lista, tab_import = st.tabs(["📋 Asignaciones", "📥 Importar Excel"])
+    tab_lista, tab_import = st.tabs([" Asignaciones", " Importar Excel"])
 
     # ── TAB IMPORTAR EXCEL ──────────────────────────────────────
     with tab_import:
@@ -682,12 +682,12 @@ def admin_asignacion_tarea():
         with col_f2:
             filtro_estado = st.selectbox(
                 "Estado",
-                ["📊 Todos", "⏳ Pendientes", "✅ Completadas", "⚠️ Vencidas"],
+                [" Todos", "Pendientes", " Completadas", " Vencidas"],
                 index=0, label_visibility="collapsed"
             )
         with col_f3:
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-            filtrar_por_fecha = st.checkbox("📅 Por mes/año")
+            filtrar_por_fecha = st.checkbox(" Por mes/año")
 
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
