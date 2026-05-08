@@ -188,7 +188,7 @@ def vista_detalle_tarea(asignacion_id):
     
     if not detalle:
         st.error("No se encontró la información de la tarea.")
-        if st.button("⬅️ Volver al listado"):
+        if st.button("⬅ Volver al listado"):
             st.session_state.vista_actual = "listado"
             st.rerun()
         return
@@ -212,23 +212,23 @@ def vista_detalle_tarea(asignacion_id):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.text_input("📅 AÑO", value=str(detalle['anio']), disabled=True)
-            st.text_input("🏢 EMPRESA", value=detalle['empresa'], disabled=True)
-            st.markdown(f"**📋 TAREA**")
+            st.text_input(" AÑO", value=str(detalle['anio']), disabled=True)
+            st.text_input(" EMPRESA", value=detalle['empresa'], disabled=True)
+            st.markdown(f" TAREA")
             st.markdown(f"<div style='background: rgba(246, 194, 125, 0.05); border: 1px solid rgba(246, 194, 125, 0.2); padding: 12px; border-radius: 8px; color: #f6c27d; font-weight: 600; margin-bottom: 15px;'>{detalle['tarea']}</div>", unsafe_allow_html=True)
             
         with col2:
-            st.text_input("🗓️ MES", value=str(detalle['mes']).upper(), disabled=True)
-            st.text_input("👤 ENCARGADO", value=detalle['encargado'], disabled=True)
+            st.text_input(" MES", value=str(detalle['mes']).upper(), disabled=True)
+            st.text_input(" ENCARGADO", value=detalle['encargado'], disabled=True)
             estado_opciones = ["pendiente", "en progreso", "completada"]
-            nuevo_estado = st.selectbox("🔄 ACTUALIZAR ESTADO", estado_opciones, 
+            nuevo_estado = st.selectbox(" ACTUALIZAR ESTADO", estado_opciones, 
                                       index=estado_opciones.index(detalle['estado'].lower()) if detalle['estado'].lower() in estado_opciones else 0)
 
         c_meta, c_cant = st.columns(2)
         with c_meta:
-            st.text_input("🎯 FECHA META", value=detalle['fecha_meta'].strftime("%d/%m/%Y"), disabled=True)
+            st.text_input(" FECHA META", value=detalle['fecha_meta'].strftime("%d/%m/%Y"), disabled=True)
         with c_cant:
-            fecha_realizada = st.date_input("✅ FECHA REALIZADA", value=datetime.now(), key="fecha_realizada_key")
+            fecha_realizada = st.date_input(" FECHA REALIZADA", value=datetime.now(), key="fecha_realizada_key")
 
         st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
@@ -251,7 +251,7 @@ def vista_detalle_tarea(asignacion_id):
                     st.error("Error al guardar el progreso.")
         
         with btn_col2:
-            if st.button("🔙 Volver al Listado", use_container_width=True):
+            if st.button(" Volver al Listado", use_container_width=True):
                 st.session_state.vista_actual = "listado"
                 st.rerun()
 
