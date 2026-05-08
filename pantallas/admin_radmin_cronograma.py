@@ -269,7 +269,7 @@ def _badge_asignado(asignado: bool) -> str:
 #  VISTA PRINCIPAL
 # ================================================================
 
-def admin_radmin_cronograma():
+def admin_cronograma():
 
     st.markdown("""
     <div style="margin-bottom:24px;">
