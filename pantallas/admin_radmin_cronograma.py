@@ -53,21 +53,43 @@ def _parsear_fecha_celda(celda: str, anio_base: int):
     return None
 
 
-def _parsear_periodo(texto: str):
+def _parsear_periodo(texto: str, anio_forzado: int):
+    """
+    Acepta:
+      - "Enero", "Febrero" ...  → usa anio_forzado
+      - "enero-2026"            → extrae año del propio texto
+      - "Diciembre*"            → limpia asterisco, usa anio_forzado
+    Retorna (anio, mes) o (None, None).
+    """
     if not texto:
         return None, None
-    partes = texto.strip().lower().split("-")
-    if len(partes) != 2:
-        return None, None
-    mes  = MESES_ABREV.get(partes[0][:3])
-    try:
-        anio = int(partes[1])
-    except ValueError:
-        return None, None
-    return anio, mes
+
+    texto = texto.strip().lower().rstrip("*").strip()
+
+    # Formato "mes-año" con guión
+    if "-" in texto:
+        partes = texto.split("-")
+        mes = MESES_ABREV.get(partes[0][:3])
+        try:
+            anio_raw = int(partes[1])
+            anio = anio_raw if anio_raw > 100 else 2000 + anio_raw
+        except (ValueError, IndexError):
+            return None, None
+        return (anio, mes) if mes else (None, None)
+
+    # Solo nombre de mes → año del selector
+    mes = MESES_ABREV.get(texto[:3])
+    if mes:
+        return anio_forzado, mes
+
+    return None, None
 
 
-def _leer_cronograma_pdf(pdf_bytes: bytes) -> dict:
+def _leer_cronograma_pdf(pdf_bytes: bytes, anio_forzado: int) -> dict:
+    """
+    Lee el PDF y devuelve { (anio, mes): { grupo: fecha } }.
+    anio_forzado: año elegido por el usuario en el selector.
+    """
     resultado = {}
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
@@ -76,8 +98,8 @@ def _leer_cronograma_pdf(pdf_bytes: bytes) -> dict:
                 for fila in tabla:
                     if not fila or not fila[0]:
                         continue
-                    periodo_txt = fila[0].strip()
-                    anio_per, mes_per = _parsear_periodo(periodo_txt)
+
+                    anio_per, mes_per = _parsear_periodo(fila[0], anio_forzado)
                     if not anio_per or not mes_per:
                         continue
 
@@ -101,7 +123,7 @@ def _leer_cronograma_pdf(pdf_bytes: bytes) -> dict:
 # ================================================================
 
 def _get_digito_grupo(ruc: str):
-    if not ruc or len(ruc) < 1:
+    if not ruc:
         return None
     d = int(ruc[-1])
     if d == 0:       return 0
@@ -151,13 +173,15 @@ def _get_usuarios_activos():
     return rows
 
 
-def _get_tareas():
+def _get_tareas_pdt():
+    """Solo tareas PDT 621."""
     conn = get_connection()
     cur  = conn.cursor()
     cur.execute("""
         SELECT t.id, t.nombre_tarea, p.nombre_proyecto
         FROM tareas t
         JOIN proyectos p ON t.proyecto_id = p.id
+        WHERE t.nombre_tarea ILIKE '%PDT%621%'
         ORDER BY p.nombre_proyecto, t.nombre_tarea
     """)
     rows = cur.fetchall()
@@ -165,9 +189,29 @@ def _get_tareas():
     return rows
 
 
-# ================================================================
-#  FIX: filtra por fecha_vencimiento, NO por periodo_mes/periodo_anio
-# ================================================================
+def _get_tareas_le():
+    """
+    LE V-C VALIDACION y LE V-C — ambas comparten el mismo cronograma PDF.
+    Se devuelven en orden: VALIDACION primero, luego LE V-C.
+    """
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT t.id, t.nombre_tarea, p.nombre_proyecto
+        FROM tareas t
+        JOIN proyectos p ON t.proyecto_id = p.id
+        WHERE t.nombre_tarea ILIKE '%LE%V-C%VALIDACION%'
+           OR (t.nombre_tarea ILIKE '%LE%V-C%'
+               AND t.nombre_tarea NOT ILIKE '%VALIDACION%')
+        ORDER BY
+            CASE WHEN t.nombre_tarea ILIKE '%VALIDACION%' THEN 1 ELSE 2 END,
+            t.nombre_tarea
+    """)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
+
 def _get_cronograma_mes(anio: int, mes: int):
     conn = get_connection()
     cur  = conn.cursor()
@@ -265,6 +309,102 @@ def _badge_asignado(asignado: bool) -> str:
     return '<span style="background:rgba(246,194,125,0.15);color:#f6c27d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;">PENDIENTE</span>'
 
 
+def _selector_anio_y_meses(key_prefix: str, hoy: date):
+    """Selector de año + multiselect de meses. Devuelve (anio, meses)."""
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        anio = st.selectbox(
+            "Año del cronograma *",
+            options=list(range(2024, 2030)),
+            index=list(range(2024, 2030)).index(hoy.year),
+            key=f"{key_prefix}_anio"
+        )
+    with c2:
+        meses = st.multiselect(
+            "Períodos a importar *",
+            options=list(range(1, 13)),
+            default=[hoy.month],
+            format_func=lambda m: MESES_ES[m],
+            key=f"{key_prefix}_meses"
+        )
+    return anio, meses
+
+
+def _procesar_preview(cronograma_pdf: dict, tarea_id: int,
+                      anio: int, meses: list, empresas: list) -> list:
+    """Genera filas de preview para una tarea dada."""
+    filas = []
+    for mes in sorted(meses):
+        for emp in empresas:
+            fecha_venc = _get_fecha_vencimiento_from_cron(emp["ruc"], cronograma_pdf, anio, mes)
+            if not fecha_venc:
+                continue
+            ya_existe = _ya_existe_cronograma(emp["id"], tarea_id, anio, mes)
+            filas.append({
+                "Período":        f"{MESES_ES[mes]} {anio}",
+                "Empresa":        emp["alias"],
+                "RUC":            emp["ruc"],
+                "Últ. dígito":    emp["ruc"][-1] if emp["ruc"] else "?",
+                "Tarea":          "",           # se rellena en el llamador si hace falta
+                "F. Vencimiento": fecha_venc.strftime("%d/%m/%Y"),
+                "Estado":         "Ya existe" if ya_existe else "Nuevo",
+                "_empresa_id":    emp["id"],
+                "_tarea_id":      tarea_id,
+                "_mes":           mes,
+                "_anio":          anio,
+                "_fecha":         fecha_venc,
+                "_existe":        ya_existe,
+            })
+    return filas
+
+
+def _render_preview_y_confirmar(filas: list, session_key: str):
+    """Tabla de preview + botón confirmar, reutilizable entre tabs."""
+    import pandas as pd
+
+    nuevos = [f for f in filas if not f["_existe"]]
+    ya_hay = [f for f in filas if f["_existe"]]
+
+    df = pd.DataFrame([{k: v for k, v in f.items() if not k.startswith("_")} for f in filas])
+    st.markdown(f"**Vista previa — {len(filas)} registros:**")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    c1, c2 = st.columns(2)
+    c1.markdown(
+        f"<span style='color:#5DCAA5;font-size:12px;'>{len(nuevos)} nuevos a insertar</span>",
+        unsafe_allow_html=True
+    )
+    c2.markdown(
+        f"<span style='color:#f6c27d;font-size:12px;'>{len(ya_hay)} ya existentes (se omitirán)</span>",
+        unsafe_allow_html=True
+    )
+
+    if nuevos:
+        if st.button("Confirmar importación", type="primary",
+                     use_container_width=True, key=f"btn_confirmar_{session_key}"):
+            filas_bd = [{
+                "tarea_id":          f["_tarea_id"],
+                "empresa_id":        f["_empresa_id"],
+                "periodo_mes":       f["_mes"],
+                "periodo_anio":      f["_anio"],
+                "fecha_vencimiento": f["_fecha"],
+            } for f in nuevos]
+
+            ok_c, err_c, errs = _insertar_cronograma_bulk(filas_bd)
+            if ok_c:
+                st.session_state.cron_msg                  = ("ok", f"{ok_c} registros importados correctamente.")
+                st.session_state[f"preview_{session_key}"] = None
+            if err_c:
+                st.session_state.cron_msg = ("error", f"{err_c} errores: {' | '.join(errs[:3])}")
+            st.rerun()
+    else:
+        st.info("Todos los registros ya existen para los períodos seleccionados.")
+
+    if st.button("Limpiar vista previa", key=f"btn_limpiar_{session_key}"):
+        st.session_state[f"preview_{session_key}"] = None
+        st.rerun()
+
+
 # ================================================================
 #  VISTA PRINCIPAL
 # ================================================================
@@ -280,15 +420,13 @@ def admin_cronograma():
     </div>
     """, unsafe_allow_html=True)
 
-    for key, val in [
-        ("cron_msg",          None),
-        ("cron_asig_id",      None),
-        ("cron_asig_open",    False),
-        ("cron_preview",      None),
-        ("cron_tarea_id",     None),
-        ("cron_anio_import",  None),
-        ("cron_meses_import", None),
-    ]:
+    for key, val in {
+        "cron_msg":       None,
+        "cron_asig_id":   None,
+        "cron_asig_open": False,
+        "preview_pdt":    None,
+        "preview_le":     None,
+    }.items():
         if key not in st.session_state:
             st.session_state[key] = val
 
@@ -299,144 +437,152 @@ def admin_cronograma():
 
     hoy = date.today()
 
-    tab_cal, tab_import = st.tabs(["Calendario", "Importar PDF"])
+    tab_cal, tab_pdt, tab_le = st.tabs([
+        "📅 Calendario",
+        "📄 Importar PDT 621",
+        "📚 Importar LE",
+    ])
 
     # ================================================================
-    #  TAB IMPORTAR PDF
+    #  TAB PDT 621
     # ================================================================
-    with tab_import:
+    with tab_pdt:
         st.markdown("""
         <div style="background:rgba(93,202,165,0.06);border:1px solid rgba(93,202,165,0.2);
                     border-radius:16px;padding:20px 24px;margin-bottom:20px;">
-            <h4 style="color:#5DCAA5;margin:0 0 8px;">Importar Cronograma SUNAT desde PDF</h4>
+            <h4 style="color:#5DCAA5;margin:0 0 6px;">Importar Cronograma PDT 621</h4>
             <p style="color:rgba(255,255,255,0.5);font-size:12px;margin:0;">
-                Sube el PDF del cronograma SUNAT. El sistema leerá las fechas de vencimiento
-                y las cruzará con el RUC de cada empresa activa.
+                Sube el PDF del cronograma SUNAT para PDT 621.
+                Selecciona el año del cronograma y los períodos a importar.
             </p>
         </div>
         """, unsafe_allow_html=True)
 
-        tareas  = _get_tareas()
-        tar_map = {f"[{t['nombre_proyecto']}] {t['nombre_tarea']}": t["id"] for t in tareas}
+        tareas_pdt = _get_tareas_pdt()
+        if not tareas_pdt:
+            st.warning("No se encontró la tarea PDT 621 en la base de datos.")
+        else:
+            tar_map_pdt = {f"[{t['nombre_proyecto']}] {t['nombre_tarea']}": t["id"] for t in tareas_pdt}
+            tar_sel_pdt = st.selectbox("Tarea *", list(tar_map_pdt.keys()), key="pdt_tar")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            tar_sel = st.selectbox("Tarea a asignar *", list(tar_map.keys()), key="import_tar")
-        with col2:
-            anio_import = st.selectbox(
-                "Año del cronograma *",
-                options=list(range(2024, 2030)),
-                index=list(range(2024, 2030)).index(hoy.year),
-                key="import_anio"
+            anio_pdt, meses_pdt = _selector_anio_y_meses("pdt", hoy)
+
+            pdf_pdt = st.file_uploader(
+                "PDF del cronograma PDT 621",
+                type=["pdf"],
+                key="pdf_uploader_pdt"
             )
 
-        meses_import = st.multiselect(
-            "Períodos a importar *",
-            options=list(range(1, 13)),
-            default=[hoy.month],
-            format_func=lambda m: MESES_ES[m],
-            key="import_meses"
-        )
+            if pdf_pdt and tar_sel_pdt and meses_pdt:
+                if st.button("Leer PDF y generar vista previa",
+                             use_container_width=True, key="btn_leer_pdt"):
+                    try:
+                        cronograma_pdf = _leer_cronograma_pdf(pdf_pdt.read(), anio_pdt)
+                        empresas       = _get_empresas_activas()
+                        tarea_id       = tar_map_pdt[tar_sel_pdt]
+                        filas = _procesar_preview(cronograma_pdf, tarea_id, anio_pdt, meses_pdt, empresas)
+                        # Rellenar columna Tarea
+                        for f in filas:
+                            f["Tarea"] = tar_sel_pdt.split("] ")[-1] if "] " in tar_sel_pdt else tar_sel_pdt
+                        st.session_state.preview_pdt = filas
+                        if not filas:
+                            st.warning("No se encontraron coincidencias entre el PDF y las empresas activas.")
+                    except Exception as ex:
+                        st.error(f"Error al leer el PDF: {ex}")
 
-        pdf_file = st.file_uploader(
-            "Selecciona el PDF del cronograma SUNAT",
-            type=["pdf"],
-            key="pdf_uploader"
-        )
-
-        if pdf_file and tar_sel and meses_import:
-            if st.button("Leer PDF y generar vista previa", use_container_width=True,
-                         key="btn_leer_pdf"):
-                try:
-                    cronograma_pdf = _leer_cronograma_pdf(pdf_file.read())
-                    empresas       = _get_empresas_activas()
-                    tarea_id       = tar_map[tar_sel]
-
-                    filas_preview = []
-                    for mes in sorted(meses_import):
-                        for emp in empresas:
-                            fecha_venc = _get_fecha_vencimiento_from_cron(
-                                emp["ruc"], cronograma_pdf, anio_import, mes
-                            )
-                            if not fecha_venc:
-                                continue
-                            ya_existe = _ya_existe_cronograma(emp["id"], tarea_id, anio_import, mes)
-                            filas_preview.append({
-                                "Período":        f"{MESES_ES[mes]} {anio_import}",
-                                "Empresa":        emp["alias"],
-                                "RUC":            emp["ruc"],
-                                "Últ. dígito":    emp["ruc"][-1] if emp["ruc"] else "?",
-                                "F. Vencimiento": fecha_venc.strftime("%d/%m/%Y"),
-                                "Estado":         "Ya existe" if ya_existe else "Nuevo",
-                                "_empresa_id":    emp["id"],
-                                "_tarea_id":      tarea_id,
-                                "_mes":           mes,
-                                "_anio":          anio_import,
-                                "_fecha":         fecha_venc,
-                                "_existe":        ya_existe,
-                            })
-
-                    st.session_state.cron_preview      = filas_preview
-                    st.session_state.cron_tarea_id     = tarea_id
-                    st.session_state.cron_anio_import  = anio_import
-                    st.session_state.cron_meses_import = meses_import
-
-                    if not filas_preview:
-                        st.warning("No se encontraron coincidencias entre el PDF y las empresas activas.")
-
-                except Exception as ex:
-                    st.error(f"Error al leer el PDF: {ex}")
-
-        if st.session_state.cron_preview:
-            import pandas as pd
-            filas   = st.session_state.cron_preview
-            nuevos  = [f for f in filas if not f["_existe"]]
-            ya_hay  = [f for f in filas if f["_existe"]]
-
-            df_prev = pd.DataFrame([
-                {k: v for k, v in f.items() if not k.startswith("_")}
-                for f in filas
-            ])
-
-            st.markdown(f"**Vista previa — {len(filas)} registros:**")
-            st.dataframe(df_prev, use_container_width=True, hide_index=True)
-
-            ci1, ci2 = st.columns(2)
-            ci1.markdown(f"<span style='color:#5DCAA5;font-size:12px;'>{len(nuevos)} nuevos a insertar</span>", unsafe_allow_html=True)
-            ci2.markdown(f"<span style='color:#f6c27d;font-size:12px;'>{len(ya_hay)} ya existentes (se omitirán)</span>", unsafe_allow_html=True)
-
-            if nuevos:
-                if st.button("Confirmar importación", type="primary",
-                             use_container_width=True, key="btn_confirmar_import"):
-                    filas_bd = [{
-                        "tarea_id":          f["_tarea_id"],
-                        "empresa_id":        f["_empresa_id"],
-                        "periodo_mes":       f["_mes"],
-                        "periodo_anio":      f["_anio"],
-                        "fecha_vencimiento": f["_fecha"],
-                    } for f in nuevos]
-
-                    ok_c, err_c, errs = _insertar_cronograma_bulk(filas_bd)
-
-                    if ok_c:
-                        st.session_state.cron_msg     = ("ok", f"{ok_c} registros importados correctamente.")
-                        st.session_state.cron_preview = None
-                    if err_c:
-                        st.session_state.cron_msg = ("error", f"{err_c} errores: {' | '.join(errs[:3])}")
-                    st.rerun()
-            else:
-                st.info("Todos los registros ya existen para los períodos seleccionados.")
-
-            if st.button("Limpiar vista previa", key="btn_limpiar_preview"):
-                st.session_state.cron_preview = None
-                st.rerun()
+            if st.session_state.preview_pdt:
+                _render_preview_y_confirmar(st.session_state.preview_pdt, "pdt")
 
     # ================================================================
-    #  TAB CALENDARIO
+    #  TAB LE  —  1 PDF → LE V-C VALIDACION + LE V-C
+    # ================================================================
+    with tab_le:
+        st.markdown("""
+        <div style="background:rgba(133,183,235,0.06);border:1px solid rgba(133,183,235,0.2);
+                    border-radius:16px;padding:20px 24px;margin-bottom:20px;">
+            <h4 style="color:#85B7EB;margin:0 0 6px;">Importar Cronograma LE — Libro Electrónico</h4>
+            <p style="color:rgba(255,255,255,0.5);font-size:12px;margin:0;">
+                <b>LE V-C VALIDACION</b> y <b>LE V-C</b> comparten el mismo cronograma PDF.
+                Con un solo upload se importan registros para <b>ambas tareas simultáneamente</b>.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        tareas_le = _get_tareas_le()
+        if not tareas_le:
+            st.warning("No se encontraron tareas LE en la base de datos.")
+        else:
+            # Mostrar las tareas que se van a importar (solo informativo)
+            st.markdown(
+                "<div style='background:rgba(255,255,255,0.03);border:1px solid rgba(133,183,235,0.15);"
+                "border-left:3px solid #85B7EB;border-radius:8px;padding:10px 14px;margin-bottom:16px;"
+                "font-size:12px;color:rgba(255,255,255,0.6);'>"
+                "Tareas que se importarán con este PDF: "
+                + " &nbsp;·&nbsp; ".join(
+                    f"<span style='color:#85B7EB;font-weight:700;'>{t['nombre_tarea']}</span>"
+                    for t in tareas_le
+                )
+                + "</div>",
+                unsafe_allow_html=True
+            )
+
+            anio_le, meses_le = _selector_anio_y_meses("le", hoy)
+
+            pdf_le = st.file_uploader(
+                "PDF del cronograma LE (válido para LE V-C VALIDACION y LE V-C)",
+                type=["pdf"],
+                key="pdf_uploader_le"
+            )
+
+            if pdf_le and meses_le:
+                if st.button("Leer PDF y generar vista previa",
+                             use_container_width=True, key="btn_leer_le"):
+                    try:
+                        cronograma_pdf = _leer_cronograma_pdf(pdf_le.read(), anio_le)
+                        empresas       = _get_empresas_activas()
+
+                        filas_total = []
+                        for tarea in tareas_le:
+                            filas_tarea = _procesar_preview(
+                                cronograma_pdf, tarea["id"], anio_le, meses_le, empresas
+                            )
+                            # Rellenar columna Tarea para distinguir en el dataframe
+                            for f in filas_tarea:
+                                f["Tarea"] = tarea["nombre_tarea"]
+                            filas_total.extend(filas_tarea)
+
+                        st.session_state.preview_le = filas_total
+
+                        if not filas_total:
+                            st.warning("No se encontraron coincidencias entre el PDF y las empresas activas.")
+                        else:
+                            # Resumen por tarea antes de confirmar
+                            for tarea in tareas_le:
+                                n_new = sum(
+                                    1 for f in filas_total
+                                    if f["_tarea_id"] == tarea["id"] and not f["_existe"]
+                                )
+                                n_dup = sum(
+                                    1 for f in filas_total
+                                    if f["_tarea_id"] == tarea["id"] and f["_existe"]
+                                )
+                                st.caption(
+                                    f"→ {tarea['nombre_tarea']}: "
+                                    f"{n_new} nuevos  |  {n_dup} ya existentes"
+                                )
+
+                    except Exception as ex:
+                        st.error(f"Error al leer el PDF: {ex}")
+
+            if st.session_state.preview_le:
+                _render_preview_y_confirmar(st.session_state.preview_le, "le")
+
+    # ================================================================
+    #  TAB CALENDARIO  (sin cambios respecto al original)
     # ================================================================
     with tab_cal:
 
-        col_mes, col_anio, col_spacer = st.columns([2, 1, 4])
+        col_mes, col_anio, _ = st.columns([2, 1, 4])
         with col_mes:
             mes_sel = st.selectbox(
                 "Mes",
@@ -463,7 +609,6 @@ def admin_cronograma():
         </div>
         """, unsafe_allow_html=True)
 
-        # ✅ QUERY CORREGIDA: usa fecha_vencimiento
         registros = _get_cronograma_mes(anio_sel, mes_sel)
 
         reg_por_dia: dict[int, list] = {}
@@ -562,9 +707,6 @@ def admin_cronograma():
 
         st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
-        # ================================================================
-        #  TABLA DETALLE + ASIGNAR TRABAJADOR
-        # ================================================================
         if registros:
             st.markdown(f"""
             <div style="margin-bottom:12px;">
@@ -586,33 +728,12 @@ def admin_cronograma():
             for r in registros:
                 with st.container(border=True):
                     c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([0.4, 0.9, 1.1, 0.8, 1, 1, 0.8, 1])
-
-                    c1.markdown(
-                        f"<span style='color:#f6c27d;font-weight:700;'>{r['fecha_vencimiento'].day}</span>",
-                        unsafe_allow_html=True
-                    )
-                    c2.markdown(
-                        f"<span style='color:rgba(255,255,255,0.45);font-size:11px;'>"
-                        f"{MESES_ES[r['periodo_mes']]} {r['periodo_anio']}</span>",
-                        unsafe_allow_html=True
-                    )
-                    c3.markdown(
-                        f"<span style='color:white;font-size:12px;'>{r['empresa']}</span>",
-                        unsafe_allow_html=True
-                    )
-                    c4.markdown(
-                        f"<span style='color:rgba(255,255,255,0.5);font-size:11px;'>{r['ruc']}</span>",
-                        unsafe_allow_html=True
-                    )
-                    c5.markdown(
-                        f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{r['tarea']}</span>",
-                        unsafe_allow_html=True
-                    )
-                    c6.markdown(
-                        f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>"
-                        f"{r['fecha_vencimiento'].strftime('%d/%m/%Y')}</span>",
-                        unsafe_allow_html=True
-                    )
+                    c1.markdown(f"<span style='color:#f6c27d;font-weight:700;'>{r['fecha_vencimiento'].day}</span>", unsafe_allow_html=True)
+                    c2.markdown(f"<span style='color:rgba(255,255,255,0.45);font-size:11px;'>{MESES_ES[r['periodo_mes']]} {r['periodo_anio']}</span>", unsafe_allow_html=True)
+                    c3.markdown(f"<span style='color:white;font-size:12px;'>{r['empresa']}</span>", unsafe_allow_html=True)
+                    c4.markdown(f"<span style='color:rgba(255,255,255,0.5);font-size:11px;'>{r['ruc']}</span>", unsafe_allow_html=True)
+                    c5.markdown(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{r['tarea']}</span>", unsafe_allow_html=True)
+                    c6.markdown(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{r['fecha_vencimiento'].strftime('%d/%m/%Y')}</span>", unsafe_allow_html=True)
                     c7.markdown(_badge_asignado(r["asignado"]), unsafe_allow_html=True)
 
                     with c8:
@@ -627,14 +748,11 @@ def admin_cronograma():
                                 unsafe_allow_html=True
                             )
 
-                # Panel asignar trabajador
                 if st.session_state.cron_asig_open and st.session_state.cron_asig_id == r["id"]:
                     st.markdown(f"""
                     <div style="background:rgba(133,183,235,0.06);border:1px solid rgba(133,183,235,0.2);
                                 border-radius:16px;padding:20px 24px;margin:4px 0 12px;">
-                        <h4 style="color:#85B7EB;margin:0 0 4px;">
-                            Asignar — {r['empresa']}
-                        </h4>
+                        <h4 style="color:#85B7EB;margin:0 0 4px;">Asignar — {r['empresa']}</h4>
                         <p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0;">
                             Periodo: {MESES_ES[r['periodo_mes']]} {r['periodo_anio']} ·
                             Vence: {r['fecha_vencimiento'].strftime('%d/%m/%Y')}
@@ -648,8 +766,7 @@ def admin_cronograma():
                     col_u, col_p = st.columns(2)
                     with col_u:
                         usr_sel = st.multiselect(
-                            "Trabajador(es) *",
-                            list(usr_map.keys()),
+                            "Trabajador(es) *", list(usr_map.keys()),
                             key=f"usr_sel_{r['id']}"
                         )
                     with col_p:
@@ -667,12 +784,9 @@ def admin_cronograma():
                             else:
                                 uid_list = [usr_map[n] for n in usr_sel]
                                 ok, result = _asignar_desde_cronograma(
-                                    cronograma_id     = r["id"],
-                                    usuario_ids       = uid_list,
-                                    empresa_id        = r["empresa_id"],
-                                    tarea_id          = r["tarea_id"],
-                                    fecha_vencimiento = r["fecha_vencimiento"],
-                                    peso              = peso,
+                                    cronograma_id=r["id"], usuario_ids=uid_list,
+                                    empresa_id=r["empresa_id"], tarea_id=r["tarea_id"],
+                                    fecha_vencimiento=r["fecha_vencimiento"], peso=peso,
                                 )
                                 if ok:
                                     st.session_state.cron_msg       = ("ok", f"Asignacion #{result} creada.")
@@ -691,5 +805,5 @@ def admin_cronograma():
         else:
             st.info(
                 f"No hay vencimientos en {MESES_ES[mes_sel]} {anio_sel}. "
-                f"Ve a 'Importar PDF' para cargar el cronograma SUNAT."
+                f"Usa 'Importar PDT 621' o 'Importar LE' para cargar el cronograma."
             )
