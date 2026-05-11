@@ -333,6 +333,8 @@ def admin_usuarios():
                     if not datos["alias"]:    errores.append("Alias requerido.")
                     if not datos["usuario"]:  errores.append("Usuario requerido.")
                     if not datos["password"]: errores.append("Contraseña requerida.")
+                    if datos["password"] and len(datos["password"]) < 8:
+                        errores.append("Contraseña debe tener mínimo 8 caracteres.")
                     if _usuario_existe(datos["usuario"]):
                         errores.append(f"El usuario '{datos['usuario']}' ya existe.")
 
@@ -437,6 +439,8 @@ def admin_usuarios():
                         if not datos["nom_res"]: errores.append("Nombre requerido.")
                         if not datos["alias"]:   errores.append("Alias requerido.")
                         if not datos["usuario"]: errores.append("Usuario requerido.")
+                        if datos["nueva_password"] and len(datos["nueva_password"]) < 8:
+                            errores.append("Contraseña debe tener mínimo 8 caracteres.")
                         if _usuario_existe(datos["usuario"], excluir_id=u["id"]):
                             errores.append(f"El usuario '{datos['usuario']}' ya existe.")
 

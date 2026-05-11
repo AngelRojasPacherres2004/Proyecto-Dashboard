@@ -980,12 +980,21 @@ def admin_asignacion_tarea():
                     f" (afecta a {n_trabajadores} trabajadores del grupo)"
                     if n_trabajadores > 1 else ""
                 )
-                st.warning(
-                    f"¿Eliminar la asignación **#{aid}** — {g['tarea']} / {g['empresa']}?{detalle}"
-                )
+                st.markdown(f"""
+                <div style="background:rgba(240,149,149,0.12);border:2px solid rgba(240,149,149,0.4);
+                            border-radius:12px;padding:16px 20px;margin:12px 0;">
+                    <div style="color:#F09595;font-weight:700;font-size:14px;margin-bottom:8px;">
+                        ⚠️ ¿Está seguro de que desea eliminar esta asignación?
+                    </div>
+                    <div style="color:rgba(255,255,255,0.7);font-size:13px;margin-bottom:12px;">
+                        Asignación: <strong>#{aid}</strong> — {g['tarea']} / {g['empresa']}{detalle}
+                        <br>Esta acción no se puede deshacer.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 d1, d2 = st.columns(2)
                 with d1:
-                    if st.button("🗑️ Confirmar", use_container_width=True,
+                    if st.button("✓ Sí, eliminar", use_container_width=True,
                                  key=f"confirm_del_asig_{aid}_{idx}", type="primary"):
                         try:
                             _eliminar_asignacion_grupo(aid)
@@ -996,7 +1005,7 @@ def admin_asignacion_tarea():
                             st.session_state.asig_msg = ("error", f"No se puede eliminar: {ex}")
                         st.rerun()
                 with d2:
-                    if st.button("✖ Cancelar", use_container_width=True,
+                    if st.button("✗ No, cancelar", use_container_width=True,
                                  key=f"cancel_del_asig_{aid}_{idx}"):
                         st.session_state.asig_id_eliminar = None
                         st.rerun()

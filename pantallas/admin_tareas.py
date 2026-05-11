@@ -310,10 +310,21 @@ def admin_tareas():
 
         # ── Confirmación eliminar ────────────────────────────────
         if st.session_state.tar_id_eliminar == t["id"]:
-            st.warning(f"¿Eliminar la tarea **{t['nombre_tarea']}**? Esta acción no se puede deshacer.")
+            st.markdown(f"""
+            <div style="background:rgba(240,149,149,0.12);border:2px solid rgba(240,149,149,0.4);
+                        border-radius:12px;padding:16px 20px;margin:12px 0;">
+                <div style="color:#F09595;font-weight:700;font-size:14px;margin-bottom:8px;">
+                    ⚠️ ¿Está seguro de que desea eliminar esta tarea?
+                </div>
+                <div style="color:rgba(255,255,255,0.7);font-size:13px;margin-bottom:12px;">
+                    Tarea: <strong>{t['nombre_tarea']}</strong>
+                    <br>Esta acción no se puede deshacer.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
             d1, d2 = st.columns(2)
             with d1:
-                if st.button("🗑️ Confirmar", use_container_width=True,
+                if st.button("✓ Sí, eliminar", use_container_width=True,
                              key=f"confirm_del_tar_{t['id']}", type="primary"):
                     try:
                         _eliminar_tarea(t["id"])
@@ -323,6 +334,6 @@ def admin_tareas():
                         st.session_state.tar_msg = ("error", f"No se puede eliminar: {ex}")
                     st.rerun()
             with d2:
-                if st.button("✖ Cancelar", use_container_width=True, key=f"cancel_del_tar_{t['id']}"):
+                if st.button("✗ No, cancelar", use_container_width=True, key=f"cancel_del_tar_{t['id']}"):
                     st.session_state.tar_id_eliminar = None
                     st.rerun()
