@@ -242,7 +242,7 @@ def admin_empresas():
     """, unsafe_allow_html=True)
 
     # ── Inicializar estados ──────────────────────────────────────
-    for key in ["emp_modo", "emp_id_editar", "emp_id_eliminar", "emp_msg"]:
+    for key in ["emp_modo", "emp_id_editar", "emp_msg"]:
         if key not in st.session_state:
             st.session_state[key] = None
 
@@ -371,16 +371,10 @@ def admin_empresas():
             
             # Columna 6: Botones
             with col6:
-                col_edit, col_del = st.columns(2, gap="small")
-                with col_edit:
-                    if st.button("🖍", key=f"edit_emp_{e['id']}", help="Editar", use_container_width=True):
-                        st.session_state.emp_modo      = "editar"
-                        st.session_state.emp_id_editar = e["id"]
-                        st.rerun()
-                with col_del:
-                    if st.button("🗑️", key=f"del_emp_{e['id']}", help="Eliminar", use_container_width=True):
-                        st.session_state.emp_id_eliminar = e["id"]
-                        st.rerun()
+                if st.button("🖍", key=f"edit_emp_{e['id']}", help="Editar", use_container_width=True):
+                    st.session_state.emp_modo      = "editar"
+                    st.session_state.emp_id_editar = e["id"]
+                    st.rerun()
 
         # ── Formulario editar inline ─────────────────────────────
         if st.session_state.emp_modo == "editar" and st.session_state.emp_id_editar == e["id"]:
@@ -419,23 +413,4 @@ def admin_empresas():
                 if st.button("✖ Cancelar", use_container_width=True, key=f"btn_cancel_edit_emp_{e['id']}"):
                     st.session_state.emp_modo      = None
                     st.session_state.emp_id_editar = None
-                    st.rerun()
-
-        # ── Confirmación eliminar ────────────────────────────────
-        if st.session_state.emp_id_eliminar == e["id"]:
-            st.warning(f"¿Eliminar **{e['razon_social']}**? Se eliminarán también sus accesos asociados.")
-            d1, d2 = st.columns(2)
-            with d1:
-                if st.button("🗑️ Confirmar", use_container_width=True,
-                            key=f"confirm_del_emp_{e['id']}", type="primary"):
-                    try:
-                        _eliminar_empresa(e["id"])
-                        st.session_state.emp_msg         = ("ok", "✅ Empresa eliminada.")
-                        st.session_state.emp_id_eliminar = None
-                    except Exception as ex:
-                        st.session_state.emp_msg = ("error", f"No se puede eliminar: {ex}")
-                    st.rerun()
-            with d2:
-                if st.button("✖ Cancelar", use_container_width=True, key=f"cancel_del_emp_{e['id']}"):
-                    st.session_state.emp_id_eliminar = None
                     st.rerun()

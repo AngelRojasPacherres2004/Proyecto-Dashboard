@@ -287,7 +287,7 @@ def admin_usuarios():
     """, unsafe_allow_html=True)
 
     # ── Inicializar estados ──────────────────────────────────────
-    for key in ["modo_crud", "uid_editar", "uid_eliminar", "crud_msg"]:
+    for key in ["modo_crud", "uid_editar", "crud_msg"]:
         if key not in st.session_state:
             st.session_state[key] = None
 
@@ -413,16 +413,10 @@ def admin_usuarios():
                 st.markdown(_badge_estado(u['estado']), unsafe_allow_html=True)
 
             with col6:
-                bc1, bc2 = st.columns(2, gap="small")
-                with bc1:
-                    if st.button("🖍", key=f"edit_{u['id']}", help="Editar", use_container_width=True):
-                        st.session_state.modo_crud  = "editar"
-                        st.session_state.uid_editar = u["id"]
-                        st.rerun()
-                with bc2:
-                    if st.button("🗑️", key=f"del_{u['id']}", help="Eliminar", use_container_width=True):
-                        st.session_state.uid_eliminar = u["id"]
-                        st.rerun()
+                if st.button("🖍", key=f"edit_{u['id']}", help="Editar", use_container_width=True):
+                    st.session_state.modo_crud  = "editar"
+                    st.session_state.uid_editar = u["id"]
+                    st.rerun()
 
         # ── Formulario editar (inline bajo la fila) ──────────────
         if st.session_state.modo_crud == "editar" and st.session_state.uid_editar == u["id"]:
@@ -465,22 +459,3 @@ def admin_usuarios():
                         st.rerun()
 
                 st.markdown("</div>", unsafe_allow_html=True)
-
-        # ── Confirmación eliminar ────────────────────────────────
-        if st.session_state.uid_eliminar == u["id"]:
-            st.warning(f"¿Eliminar a **{u['nom_res']}**? Esta acción no se puede deshacer.")
-            d1, d2 = st.columns(2)
-            with d1:
-                if st.button("🗑️ Confirmar eliminación", use_container_width=True,
-                             key=f"confirm_del_{u['id']}", type="primary"):
-                    try:
-                        _eliminar_usuario(u["id"])
-                        st.session_state.crud_msg     = ("ok", "✔ Usuario eliminado.")
-                        st.session_state.uid_eliminar = None
-                    except Exception as e:
-                        st.session_state.crud_msg = ("error", f"No se puede eliminar: {e}")
-                    st.rerun()
-            with d2:
-                if st.button("✖ Cancelar", use_container_width=True, key=f"cancel_del_{u['id']}"):
-                    st.session_state.uid_eliminar = None
-                    st.rerun()
