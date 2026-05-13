@@ -108,6 +108,14 @@ def _actualizar_usuario(uid: int, data: dict):
     cur.close(); conn.close()
 
 
+def _cambiar_estado_usuario(uid: int, nuevo_estado: str):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET estado=%s WHERE id=%s", (nuevo_estado, uid))
+    conn.commit()
+    cur.close(); conn.close()
+
+
 def _eliminar_usuario(uid: int):
     conn = get_connection()
     cur = conn.cursor()
@@ -375,9 +383,9 @@ def admin_usuarios():
 
     # Cabecera tabla
     with st.container(border=False):
-        col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1, 1.5, 1, 1, 0.8])
-        headers = ["NOMBRE / ALIAS", "USUARIO", "ÁREA · SUBÁREA", "ROL", "ESTADO", "ACCIONES"]
-        for col, header in zip([col1, col2, col3, col4, col5, col6], headers):
+        col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1, 1.5, 1, 1, 0.6, 0.6])
+        headers = ["NOMBRE / ALIAS", "USUARIO", "ÁREA · SUBÁREA", "ROL", "ESTADO", "ESTADO", "EDITAR"]
+        for col, header in zip([col1, col2, col3, col4, col5, col6, col7], headers):
             with col:
                 st.markdown(
                     f"<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>{header}</span>",
@@ -392,7 +400,7 @@ def admin_usuarios():
         area_str  = area_info + (f" · {sub_info}" if sub_info else "")
 
         with st.container(border=True):
-            col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1, 1.5, 1, 1, 0.8])
+            col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1, 1.5, 1, 1, 0.6, 0.6])
 
             with col1:
                 st.markdown(f"""
@@ -415,6 +423,17 @@ def admin_usuarios():
                 st.markdown(_badge_estado(u['estado']), unsafe_allow_html=True)
 
             with col6:
+                nuevo_estado = "inactivo" if u['estado'] == "activo" else "activo"
+                emoji = "🟢" if u['estado'] == "activo" else "🔴"
+                if st.button(emoji, key=f"toggle_{u['id']}", help=f"Cambiar a {nuevo_estado}", use_container_width=True):
+                    try:
+                        _cambiar_estado_usuario(u['id'], nuevo_estado)
+                        st.session_state.crud_msg = ("ok", f"✅ Usuario '{u['alias']}' ahora está {nuevo_estado}.")
+                    except Exception as e:
+                        st.session_state.crud_msg = ("error", f"Error al cambiar estado: {e}")
+                    st.rerun()
+
+            with col7:
                 if st.button("🖍", key=f"edit_{u['id']}", help="Editar", use_container_width=True):
                     st.session_state.modo_crud  = "editar"
                     st.session_state.uid_editar = u["id"]

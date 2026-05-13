@@ -95,6 +95,14 @@ def _eliminar_empresa(eid: int):
     cur.close(); conn.close()
 
 
+def _cambiar_estado_empresa(eid: int, nuevo_estado: str):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE empresas SET estado_contrato=%s WHERE id=%s", (nuevo_estado, eid))
+    conn.commit()
+    cur.close(); conn.close()
+
+
 def _ruc_existe(ruc: str, excluir_id: int = None):
     conn = get_connection()
     cur = conn.cursor()
@@ -323,7 +331,7 @@ def admin_empresas():
     
     # Encabezado de la tabla
     with st.container(border=False):
-        col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1, 1, 1, 1, 0.8])
+        col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1, 1, 1, 1, 0.6, 0.6])
         with col1:
             st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>RAZÓN SOCIAL</span>", unsafe_allow_html=True)
         with col2:
@@ -335,15 +343,17 @@ def admin_empresas():
         with col5:
             st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ESTADO</span>", unsafe_allow_html=True)
         with col6:
-            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ACCIONES</span>", unsafe_allow_html=True)
+            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>ESTADO</span>", unsafe_allow_html=True)
+        with col7:
+            st.markdown("<span style='color:rgba(255,255,255,0.5);font-weight:600;font-size:12px;'>EDITAR</span>", unsafe_allow_html=True)
     
     st.divider()
     
     for e in empresas:
         # Usar contenedor para cada fila
         with st.container(border=True):
-            col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1, 1, 1, 1, 0.8])
-            
+            col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1, 1, 1, 1, 0.6, 0.6])
+
             # Columna 1: Razón social
             with col1:
                 st.markdown(f"""
@@ -352,25 +362,38 @@ def admin_empresas():
                     {'<br><span style="color:rgba(255,255,255,0.35);font-size:11px;">' + e['alias'] + '</span>' if e.get('alias') else ''}
                 </div>
                 """, unsafe_allow_html=True)
-            
+
             # Columna 2: RUC
             with col2:
                 st.caption(e['ruc'])
-            
+
             # Columna 3: Régimen tributario
             with col3:
                 st.markdown(_badge_regimen(e.get('regimen_tributario')), unsafe_allow_html=True)
-            
+
             # Columna 4: Régimen laboral
             with col4:
                 st.caption(e.get('regimen_laboral') or '—')
-            
+
             # Columna 5: Estado
             with col5:
                 st.markdown(_badge_estado(e.get('estado_contrato', 'Activo')), unsafe_allow_html=True)
-            
-            # Columna 6: Botones
+
+            # Columna 6: Toggle estado
             with col6:
+                estado_actual = e.get('estado_contrato', 'Activo')
+                nuevo_estado = "Inactivo" if estado_actual == "Activo" else "Activo"
+                emoji = "🟢" if estado_actual == "Activo" else "🔴"
+                if st.button(emoji, key=f"toggle_emp_{e['id']}", help=f"Cambiar a {nuevo_estado}", use_container_width=True):
+                    try:
+                        _cambiar_estado_empresa(e['id'], nuevo_estado)
+                        st.session_state.emp_msg = ("ok", f"✅ Empresa ahora está {nuevo_estado.lower()}.")
+                    except Exception as e_err:
+                        st.session_state.emp_msg = ("error", f"Error al cambiar estado: {e_err}")
+                    st.rerun()
+
+            # Columna 7: Botones
+            with col7:
                 if st.button("🖍", key=f"edit_emp_{e['id']}", help="Editar", use_container_width=True):
                     st.session_state.emp_modo      = "editar"
                     st.session_state.emp_id_editar = e["id"]
