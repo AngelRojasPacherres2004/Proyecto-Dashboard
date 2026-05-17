@@ -389,7 +389,8 @@ def admin_empresas():
                         _cambiar_estado_empresa(e['id'], nuevo_estado)
                         st.session_state.emp_msg = ("ok", f"✅ Empresa ahora está {nuevo_estado.lower()}.")
                     except Exception as e_err:
-                        st.session_state.emp_msg = ("error", f"Error al cambiar estado: {e_err}")
+                     s 
+                     st.session_state.emp_msg = ("error", f"Error al cambiar estado: {e_err}")
                     st.rerun()
 
             # Columna 7: Botones
