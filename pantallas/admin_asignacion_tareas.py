@@ -676,13 +676,13 @@ def admin_asignacion_tarea():
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
             filtro_texto = st.text_input(
-                "🔎 Buscar por trabajador, empresa o tarea",
+                " Buscar por trabajador, empresa o tarea",
                 placeholder="Escribe aquí...", label_visibility="collapsed"
             )
         with col_f2:
             filtro_estado = st.selectbox(
                 "Estado",
-                [" Todos", "Pendientes", " Completadas", " Vencidas"],
+                ["Todos", "Pendientes", "Completadas", "Vencidas"],
                 index=0, label_visibility="collapsed"
             )
         with col_f3:
@@ -763,16 +763,16 @@ def admin_asignacion_tarea():
                     st.rerun()
 
         # ── OBTENER Y FILTRAR ASIGNACIONES ─────────────────────
-        solo_completadas = filtrar_por_fecha
+        
         grupos = _get_asignaciones(
-            mes=filtro_mes, anio=filtro_anio, solo_completadas=solo_completadas
+            mes=filtro_mes, anio=filtro_anio, 
         )
 
         estado_map = {
-            "📊 Todos":       "Todos",
-            "⏳ Pendientes":  "pendiente",
-            "✅ Completadas": "completada",
-            "⚠️ Vencidas":   "vencida",
+            "Todos":       "Todos",
+            "Pendientes":  "pendiente",
+            "Completadas": "completada",
+            "Vencidas":   "vencida",
         }
         filtro_estado_interno = estado_map.get(filtro_estado, "Todos")
 
