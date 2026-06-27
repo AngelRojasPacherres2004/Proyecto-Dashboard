@@ -22,6 +22,11 @@ def _get_empresas():
     return rows
 
 
+@st.cache_data(ttl=30)
+def _cached_get_empresas():
+    return _get_empresas()
+
+
 def _get_empresa_by_id(eid: int):
     conn = get_connection()
     cur = conn.cursor()
@@ -29,6 +34,10 @@ def _get_empresa_by_id(eid: int):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
+
+
+def _clear_empresa_cache():
+    _cached_get_empresas.clear()
 
 
 def _crear_empresa(data: dict):
@@ -57,6 +66,7 @@ def _crear_empresa(data: dict):
         data["correo_principal"], data["digio_ruc"],       data["p_electronico"],
     ))
     conn.commit()
+    _clear_empresa_cache()
     cur.close(); conn.close()
 
 
@@ -84,6 +94,7 @@ def _actualizar_empresa(eid: int, data: dict):
         eid,
     ))
     conn.commit()
+    _clear_empresa_cache()
     cur.close(); conn.close()
 
 
@@ -92,6 +103,7 @@ def _eliminar_empresa(eid: int):
     cur = conn.cursor()
     cur.execute("DELETE FROM empresas WHERE id = %s", (eid,))
     conn.commit()
+    _clear_empresa_cache()
     cur.close(); conn.close()
 
 
@@ -100,6 +112,7 @@ def _cambiar_estado_empresa(eid: int, nuevo_estado: str):
     cur = conn.cursor()
     cur.execute("UPDATE empresas SET estado_contrato=%s WHERE id=%s", (nuevo_estado, eid))
     conn.commit()
+    _clear_empresa_cache()
     cur.close(); conn.close()
 
 
@@ -284,11 +297,13 @@ def admin_empresas():
         </div>
         """, unsafe_allow_html=True)
 
-        datos = _form_empresa(key_prefix="crear")
+        with st.form("crear_empresa_form", clear_on_submit=False):
+            datos = _form_empresa(key_prefix="crear")
+            c1, c2 = st.columns(2)
+            guardar = c1.form_submit_button("💾 Guardar", use_container_width=True, type="primary")
+            cancelar = c2.form_submit_button("✖ Cancelar", use_container_width=True)
 
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("💾 Guardar", use_container_width=True, key="btn_crear_emp"):
+            if guardar:
                 errores = []
                 if not datos["razon_social"]: errores.append("Razón social requerida.")
                 if not datos["ruc"]:          errores.append("RUC requerido.")
@@ -304,16 +319,13 @@ def admin_empresas():
                         st.session_state.emp_modo = None
                     except Exception as e:
                         st.session_state.emp_msg = ("error", f"Error al crear: {e}")
-                st.rerun()
-        with c2:
-            if st.button("✖ Cancelar", use_container_width=True, key="btn_cancel_crear_emp"):
+            if cancelar:
                 st.session_state.emp_modo = None
-                st.rerun()
 
     # ================================================================
     #  TABLA DE EMPRESAS
     # ================================================================
-    empresas = _get_empresas()
+    empresas = _cached_get_empresas()
 
     if busqueda:
         q = busqueda.lower()
@@ -389,16 +401,13 @@ def admin_empresas():
                         _cambiar_estado_empresa(e['id'], nuevo_estado)
                         st.session_state.emp_msg = ("ok", f"✅ Empresa ahora está {nuevo_estado.lower()}.")
                     except Exception as e_err:
-                     s 
-                     st.session_state.emp_msg = ("error", f"Error al cambiar estado: {e_err}")
-                    st.rerun()
+                        st.session_state.emp_msg = ("error", f"Error al cambiar estado: {e_err}")
 
             # Columna 7: Botones
             with col7:
                 if st.button("🖍", key=f"edit_emp_{e['id']}", help="Editar", use_container_width=True):
                     st.session_state.emp_modo      = "editar"
                     st.session_state.emp_id_editar = e["id"]
-                    st.rerun()
 
         # ── Formulario editar inline ─────────────────────────────
         if st.session_state.emp_modo == "editar" and st.session_state.emp_id_editar == e["id"]:
@@ -410,11 +419,13 @@ def admin_empresas():
             </div>
             """, unsafe_allow_html=True)
 
-            datos = _form_empresa(prefill=prefill, key_prefix=f"edit_emp_{e['id']}")
+            with st.form(f"edit_empresa_form_{e['id']}", clear_on_submit=False):
+                datos = _form_empresa(prefill=prefill, key_prefix=f"edit_emp_{e['id']}")
+                e1, e2 = st.columns(2)
+                actualizar = e1.form_submit_button("💾 Actualizar", use_container_width=True, type="primary")
+                cancelar = e2.form_submit_button("✖ Cancelar", use_container_width=True)
 
-            e1, e2 = st.columns(2)
-            with e1:
-                if st.button("💾 Actualizar", use_container_width=True, key=f"btn_upd_emp_{e['id']}"):
+                if actualizar:
                     errores = []
                     if not datos["razon_social"]: errores.append("Razón social requerida.")
                     if not datos["ruc"]:          errores.append("RUC requerido.")
@@ -432,9 +443,6 @@ def admin_empresas():
                             st.session_state.emp_id_editar = None
                         except Exception as ex:
                             st.session_state.emp_msg = ("error", f"Error al actualizar: {ex}")
-                    st.rerun()
-            with e2:
-                if st.button("✖ Cancelar", use_container_width=True, key=f"btn_cancel_edit_emp_{e['id']}"):
+                if cancelar:
                     st.session_state.emp_modo      = None
                     st.session_state.emp_id_editar = None
-                    st.rerun()

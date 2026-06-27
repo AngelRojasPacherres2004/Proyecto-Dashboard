@@ -23,6 +23,11 @@ def _get_usuarios_activos():
     return rows
 
 
+@st.cache_data(ttl=60)
+def _cached_get_usuarios_activos():
+    return _get_usuarios_activos()
+
+
 def _get_empresas_activas():
     conn = get_connection()
     cur = conn.cursor()
@@ -37,6 +42,11 @@ def _get_empresas_activas():
     return rows
 
 
+@st.cache_data(ttl=60)
+def _cached_get_empresas_activas():
+    return _get_empresas_activas()
+
+
 def _get_proyectos():
     conn = get_connection()
     cur = conn.cursor()
@@ -44,6 +54,11 @@ def _get_proyectos():
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
+
+
+@st.cache_data(ttl=60)
+def _cached_get_proyectos():
+    return _get_proyectos()
 
 
 def _get_tareas():
@@ -58,6 +73,11 @@ def _get_tareas():
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
+
+
+@st.cache_data(ttl=60)
+def _cached_get_tareas():
+    return _get_tareas()
 
 
 def _get_asignaciones(mes=None, anio=None, solo_completadas=False):
@@ -142,6 +162,19 @@ def _get_asignaciones(mes=None, anio=None, solo_completadas=False):
     return list(grupos.values())
 
 
+@st.cache_data(ttl=30)
+def _cached_get_asignaciones(mes=None, anio=None, solo_completadas=False):
+    return _get_asignaciones(mes=mes, anio=anio, solo_completadas=solo_completadas)
+
+
+def _limpiar_cache_asignaciones():
+    _cached_get_usuarios_activos.clear()
+    _cached_get_empresas_activas.clear()
+    _cached_get_proyectos.clear()
+    _cached_get_tareas.clear()
+    _cached_get_asignaciones.clear()
+
+
 def _get_asignacion_grupo_by_id(aid: int):
     """Devuelve todos los campos de la asignación (primer usuario) para pre-rellenar el form."""
     conn = get_connection()
@@ -177,6 +210,7 @@ def _crear_asignacion(data: dict):
                   data["fecha_meta"], data.get("peso", 1)))
 
         conn.commit()
+        _limpiar_cache_asignaciones()
     except Exception as ex:
         conn.rollback()
         raise ex
@@ -228,7 +262,28 @@ def _actualizar_asignacion_grupo(aid: int, data: dict):
             """, (aid, uid, data["empresa_id"], data["tarea_id"],
                   data["fecha_meta"], data["estado"], data["peso"]))
 
+        if not mantener and not agregar:
+            cur.execute("""
+                SELECT 1
+                FROM asignaciones
+                WHERE empresa_id = %s
+                  AND tarea_id = %s
+                  AND fecha_meta = %s
+                LIMIT 1
+            """, (data["empresa_id"], data["tarea_id"], data["fecha_meta"]))
+            sigue_asignada = cur.fetchone() is not None
+
+            if not sigue_asignada:
+                cur.execute("""
+                    UPDATE cronograma_pdt
+                    SET asignado = FALSE
+                    WHERE empresa_id = %s
+                      AND tarea_id = %s
+                      AND fecha_vencimiento = %s
+                """, (data["empresa_id"], data["tarea_id"], data["fecha_meta"]))
+
         conn.commit()
+        _limpiar_cache_asignaciones()
     except Exception as ex:
         conn.rollback()
         raise ex
@@ -245,6 +300,7 @@ def _actualizar_estado_grupo(aid: int, nuevo_estado: str):
         (nuevo_estado, aid)
     )
     conn.commit()
+    _limpiar_cache_asignaciones()
     cur.close(); conn.close()
 
 
@@ -252,8 +308,38 @@ def _eliminar_asignacion_grupo(aid: int):
     """Elimina TODAS las filas del grupo (mismo id)."""
     conn = get_connection()
     cur = conn.cursor()
+    cur.execute("""
+        SELECT empresa_id, tarea_id, fecha_meta
+        FROM asignaciones
+        WHERE id = %s
+        LIMIT 1
+    """, (aid,))
+    ref = cur.fetchone()
+
     cur.execute("DELETE FROM asignaciones WHERE id = %s", (aid,))
+
+    if ref:
+        cur.execute("""
+            SELECT 1
+            FROM asignaciones
+            WHERE empresa_id = %s
+              AND tarea_id = %s
+              AND fecha_meta = %s
+            LIMIT 1
+        """, (ref["empresa_id"], ref["tarea_id"], ref["fecha_meta"]))
+        sigue_asignada = cur.fetchone() is not None
+
+        if not sigue_asignada:
+            cur.execute("""
+                UPDATE cronograma_pdt
+                SET asignado = FALSE
+                WHERE empresa_id = %s
+                  AND tarea_id = %s
+                  AND fecha_vencimiento = %s
+            """, (ref["empresa_id"], ref["tarea_id"], ref["fecha_meta"]))
+
     conn.commit()
+    _limpiar_cache_asignaciones()
     cur.close(); conn.close()
 
 
@@ -355,9 +441,9 @@ def _form_asignacion(prefill: dict = None, key_prefix: str = "new"):
     Al crear: multiselect de usuarios.
     Al editar: multiselect también (para poder agregar/quitar usuarios del grupo).
     """
-    usuarios = _get_usuarios_activos()
-    empresas = _get_empresas_activas()
-    tareas   = _get_tareas()
+    usuarios = _cached_get_usuarios_activos()
+    empresas = _cached_get_empresas_activas()
+    tareas   = _cached_get_tareas()
 
     usr_map  = {f"{u['nom_res']} ({u['alias']})": u["id"] for u in usuarios}
     emp_map  = {f"{e['razon_social']} — {e['ruc']}": e["id"] for e in empresas}
@@ -629,7 +715,6 @@ def _seccion_importar_excel():
             st.session_state.asig_msg = ("ok", f"✅ {ok_count} asignación(es) importada(s) correctamente.")
         if err_count:
             st.session_state.asig_msg = ("error", f"⚠ {err_count} fila(s) fallaron al insertar.")
-        st.rerun()
 
 
 # ================================================================
@@ -670,48 +755,47 @@ def admin_asignacion_tarea():
 
     # ── TAB LISTA DE ASIGNACIONES ───────────────────────────────
     with tab_lista:
-
         st.markdown("###  Filtros")
-
-        col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            filtro_texto = st.text_input(
-                " Buscar por trabajador, empresa o tarea",
-                placeholder="Escribe aquí...", label_visibility="collapsed"
-            )
-        with col_f2:
-            filtro_estado = st.selectbox(
-                "Estado",
-                ["Todos", "Pendientes", "Completadas", "Vencidas"],
-                index=0, label_visibility="collapsed"
-            )
-        with col_f3:
-            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-            filtrar_por_fecha = st.checkbox(" Por mes/año")
-
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-        filtro_mes = filtro_anio = None
-        if filtrar_por_fecha:
-            hoy = date.today()
-            meses = {
-                1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
-                5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
-                9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
-            }
-            col_m, col_a = st.columns(2)
-            with col_m:
-                filtro_mes = st.selectbox(
-                    "Mes", options=list(meses.keys()),
-                    format_func=lambda m: meses[m],
-                    index=hoy.month - 1, key="filtro_mes"
+        with st.form("filtros_asig_form", border=False):
+            col_f1, col_f2, col_f3 = st.columns(3)
+            with col_f1:
+                filtro_texto = st.text_input(
+                    " Buscar por trabajador, empresa o tarea",
+                    placeholder="Escribe aquí...", label_visibility="collapsed"
                 )
-            with col_a:
-                filtro_anio = st.selectbox(
-                    "Año", options=list(range(2022, hoy.year + 2)),
-                    index=list(range(2022, hoy.year + 2)).index(hoy.year),
-                    key="filtro_anio"
+            with col_f2:
+                filtro_estado = st.selectbox(
+                    "Estado",
+                    ["Todos", "Pendientes", "Completadas", "Vencidas"],
+                    index=0, label_visibility="collapsed"
                 )
+            with col_f3:
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                filtrar_por_fecha = st.checkbox(" Por mes/año")
+
+            filtro_mes = filtro_anio = None
+            if filtrar_por_fecha:
+                hoy = date.today()
+                meses = {
+                    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+                    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+                    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+                }
+                col_m, col_a = st.columns(2)
+                with col_m:
+                    filtro_mes = st.selectbox(
+                        "Mes", options=list(meses.keys()),
+                        format_func=lambda m: meses[m],
+                        index=hoy.month - 1, key="filtro_mes"
+                    )
+                with col_a:
+                    filtro_anio = st.selectbox(
+                        "Año", options=list(range(2022, hoy.year + 2)),
+                        index=list(range(2022, hoy.year + 2)).index(hoy.year),
+                        key="filtro_anio"
+                    )
+
+            aplicar_filtros = st.form_submit_button("Aplicar filtros", use_container_width=True)
 
         col_btn_crear = st.columns(4)[3]
         with col_btn_crear:
@@ -730,11 +814,13 @@ def admin_asignacion_tarea():
             </div>
             """, unsafe_allow_html=True)
 
-            datos = _form_asignacion(key_prefix="crear")
+            with st.form("crear_asig_form", clear_on_submit=False):
+                datos = _form_asignacion(key_prefix="crear")
+                c1, c2 = st.columns(2)
+                guardar = c1.form_submit_button("💾 Guardar", use_container_width=True, type="primary")
+                cancelar = c2.form_submit_button("✖ Cancelar", use_container_width=True)
 
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("💾 Guardar", use_container_width=True, key="btn_crear_asig"):
+                if guardar:
                     errores = []
                     if not datos["usuario_ids"]: errores.append("Selecciona al menos un trabajador.")
                     if not datos["empresa_id"]:  errores.append("Selecciona una empresa.")
@@ -756,11 +842,8 @@ def admin_asignacion_tarea():
                             st.session_state.asig_modo = None
                         except Exception as ex:
                             st.session_state.asig_msg = ("error", f"Error al guardar: {ex}")
-                    st.rerun()
-            with c2:
-                if st.button("✖ Cancelar", use_container_width=True, key="btn_cancel_crear_asig"):
+                if cancelar:
                     st.session_state.asig_modo = None
-                    st.rerun()
 
         # ── OBTENER Y FILTRAR ASIGNACIONES ─────────────────────
         
@@ -919,11 +1002,9 @@ def admin_asignacion_tarea():
                         if st.button("🖍", key=f"edit_asig_{aid}_{idx}", help="Editar", use_container_width=True):
                             st.session_state.asig_modo      = "editar"
                             st.session_state.asig_id_editar = aid
-                            st.rerun()
                     with ba2:
                         if st.button("🗑️", key=f"del_asig_{aid}_{idx}", help="Eliminar", use_container_width=True):
                             st.session_state.asig_id_eliminar = aid
-                            st.rerun()
 
             # ── Formulario editar inline ────────────────────────
             if st.session_state.asig_modo == "editar" and st.session_state.asig_id_editar == aid:
@@ -943,12 +1024,13 @@ def admin_asignacion_tarea():
                 </div>
                 """, unsafe_allow_html=True)
 
-                datos = _form_asignacion(prefill=prefill, key_prefix=f"edit_{aid}_{idx}")
+                with st.form(f"edit_asig_form_{aid}_{idx}", clear_on_submit=False):
+                    datos = _form_asignacion(prefill=prefill, key_prefix=f"edit_{aid}_{idx}")
+                    e1, e2 = st.columns(2)
+                    actualizar = e1.form_submit_button("💾 Actualizar", use_container_width=True, type="primary")
+                    cancelar = e2.form_submit_button("✖ Cancelar", use_container_width=True)
 
-                e1, e2 = st.columns(2)
-                with e1:
-                    if st.button("💾 Actualizar", use_container_width=True,
-                                 key=f"btn_upd_asig_{aid}_{idx}"):
+                    if actualizar:
                         errores = []
                         if not datos["usuario_ids"]: errores.append("Selecciona al menos un trabajador.")
                         if not datos["empresa_id"]:  errores.append("Selecciona una empresa.")
@@ -965,13 +1047,9 @@ def admin_asignacion_tarea():
                                 st.session_state.asig_pagina_actual = 1
                             except Exception as ex:
                                 st.session_state.asig_msg = ("error", f"Error: {ex}")
-                        st.rerun()
-                with e2:
-                    if st.button("✖ Cancelar", use_container_width=True,
-                                 key=f"btn_cancel_edit_asig_{aid}_{idx}"):
+                    if cancelar:
                         st.session_state.asig_modo      = None
                         st.session_state.asig_id_editar = None
-                        st.rerun()
 
             # ── Confirmación eliminar ───────────────────────────
             if st.session_state.asig_id_eliminar == aid:
@@ -1001,14 +1079,13 @@ def admin_asignacion_tarea():
                             st.session_state.asig_msg         = ("ok", f"✅ Asignación #{aid} eliminada.")
                             st.session_state.asig_id_eliminar = None
                             st.session_state.asig_pagina_actual = 1
+                            _limpiar_cache_asignaciones()
                         except Exception as ex:
                             st.session_state.asig_msg = ("error", f"No se puede eliminar: {ex}")
-                        st.rerun()
                 with d2:
                     if st.button("✗ No, cancelar", use_container_width=True,
                                  key=f"cancel_del_asig_{aid}_{idx}"):
                         st.session_state.asig_id_eliminar = None
-                        st.rerun()
 
         # ── Paginación ──────────────────────────────────────────
         st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
@@ -1016,7 +1093,6 @@ def admin_asignacion_tarea():
         with col_pag1:
             if st.button("← Anterior", use_container_width=True, disabled=(pagina_actual == 1)):
                 st.session_state.asig_pagina_actual = pagina_actual - 1
-                st.rerun()
         with col_pag2:
             st.markdown(f"""
             <div style="display:flex;justify-content:center;align-items:center;height:40px;">
@@ -1028,4 +1104,3 @@ def admin_asignacion_tarea():
         with col_pag3:
             if st.button("Siguiente →", use_container_width=True, disabled=(pagina_actual == total_paginas)):
                 st.session_state.asig_pagina_actual = pagina_actual + 1
-                st.rerun()

@@ -403,7 +403,13 @@ def _get_cronograma_mes(anio: int, mes: int):
             c.periodo_mes, 
             c.periodo_anio,
             c.fecha_vencimiento, 
-            c.asignado,
+            EXISTS (
+                SELECT 1
+                FROM asignaciones a2
+                WHERE a2.empresa_id = c.empresa_id
+                  AND a2.tarea_id = c.tarea_id
+                  AND a2.fecha_meta = c.fecha_vencimiento
+            ) AS asignado,
             e.alias AS empresa, 
             e.ruc, 
             e.id AS empresa_id,
@@ -516,13 +522,47 @@ def _asignar_desde_cronograma(cronograma_id, usuario_ids, empresa_id, tarea_id, 
         cur.close(); conn.close()
 
 
+def _sincronizar_estado_cronograma_desde_asignacion(empresa_id, tarea_id, fecha_meta):
+    """
+    Si ya no quedan filas en asignaciones para la misma empresa/tarea/fecha,
+    libera el registro del cronograma para que vuelva a mostrarse como pendiente.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT 1
+            FROM asignaciones
+            WHERE empresa_id = %s
+              AND tarea_id = %s
+              AND fecha_meta = %s
+            LIMIT 1
+        """, (empresa_id, tarea_id, fecha_meta))
+        sigue_asignada = cur.fetchone() is not None
+
+        if not sigue_asignada:
+            cur.execute("""
+                UPDATE cronograma_pdt
+                SET asignado = FALSE
+                WHERE empresa_id = %s
+                  AND tarea_id = %s
+                  AND fecha_vencimiento = %s
+            """, (empresa_id, tarea_id, fecha_meta))
+            conn.commit()
+            return True
+
+        return False
+    finally:
+        cur.close(); conn.close()
+
+
 # ================================================================
 #  HELPERS UI
 # ================================================================
 
 def _badge_asignado(asignado: bool) -> str:
     if asignado:
-        return '<span style="background:rgba(93,202,165,0.15);color:#5DCAA5;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;">ASIGNADO</span>'
+        return '<span style="background:rgba(133,183,235,0.18);color:#85B7EB;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;">ASIGNADO</span>'
     return '<span style="background:rgba(246,194,125,0.15);color:#f6c27d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;">PENDIENTE</span>'
 
 
@@ -612,13 +652,11 @@ def _render_preview_y_confirmar(filas: list, session_key: str):
                 st.session_state[f"preview_{session_key}"] = None
             if err_c:
                 st.session_state.cron_msg = ("error", f"{err_c} errores: {' | '.join(errs[:3])}")
-            st.rerun()
     else:
         st.info("Todos los registros ya existen para los períodos seleccionados.")
 
     if st.button("Limpiar vista previa", key=f"btn_limpiar_{session_key}"):
         st.session_state[f"preview_{session_key}"] = None
-        st.rerun()
 
 
 # ================================================================
@@ -1027,42 +1065,43 @@ def admin_cronograma():
                             if st.button("Asignar", key=f"asig_{r['id']}", use_container_width=True):
                                 st.session_state.cron_asig_id   = r["id"]
                                 st.session_state.cron_asig_open = True
-                                st.rerun()
                         else:
                             st.markdown("<span style='color:rgba(255,255,255,0.3);font-size:11px;'>listo</span>", unsafe_allow_html=True)
 
                 if st.session_state.cron_asig_open and st.session_state.cron_asig_id == r["id"]:
-                    st.markdown(f"""
-                    <div style="background:rgba(133,183,235,0.06);border:1px solid rgba(133,183,235,0.2);
-                                border-radius:16px;padding:20px 24px;margin:4px 0 12px;">
-                        <h4 style="color:#85B7EB;margin:0 0 4px;">Asignar — {r['empresa']}</h4>
-                        <p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0;">
-                            Período: {MESES_ES[r['periodo_mes']]} {r['periodo_anio']} ·
-                            Tarea: {r['tarea']} ·
-                            Fecha programada: {r['fecha_vencimiento'].strftime('%d/%m/%Y')}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    with st.form(key=f"form_asig_{r['id']}", clear_on_submit=False):
+                        st.markdown(f"""
+                        <div style="background:rgba(133,183,235,0.06);border:1px solid rgba(133,183,235,0.2);
+                                    border-radius:16px;padding:20px 24px;margin:4px 0 12px;">
+                            <h4 style="color:#85B7EB;margin:0 0 4px;">Asignar — {r['empresa']}</h4>
+                            <p style="color:rgba(255,255,255,0.4);font-size:12px;margin:0;">
+                                Período: {MESES_ES[r['periodo_mes']]} {r['periodo_anio']} ·
+                                Tarea: {r['tarea']} ·
+                                Fecha programada: {r['fecha_vencimiento'].strftime('%d/%m/%Y')}
+                            </p>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                    usuarios = _get_usuarios_activos()
-                    usr_map  = {f"{u['nom_res']} ({u['alias']})": u["id"] for u in usuarios}
+                        usuarios = _get_usuarios_activos()
+                        usr_map  = {f"{u['nom_res']} ({u['alias']})": u["id"] for u in usuarios}
 
-                    col_u, col_p = st.columns(2)
-                    with col_u:
-                        usr_sel = st.multiselect(
-                            "Trabajador(es) *", list(usr_map.keys()),
-                            key=f"usr_sel_{r['id']}"
-                        )
-                    with col_p:
-                        peso = st.number_input(
-                            "Peso", min_value=1, max_value=10,
-                            value=1, key=f"peso_sel_{r['id']}"
-                        )
+                        col_u, col_p = st.columns(2)
+                        with col_u:
+                            usr_sel = st.multiselect(
+                                "Trabajador(es) *", list(usr_map.keys()),
+                                key=f"usr_sel_{r['id']}"
+                            )
+                        with col_p:
+                            peso = st.number_input(
+                                "Peso", min_value=1, max_value=10,
+                                value=1, key=f"peso_sel_{r['id']}"
+                            )
 
-                    b1, b2 = st.columns(2)
-                    with b1:
-                        if st.button("Confirmar", use_container_width=True,
-                                     type="primary", key=f"confirm_asig_{r['id']}"):
+                        b1, b2 = st.columns(2)
+                        confirmar = b1.form_submit_button("Confirmar", use_container_width=True, type="primary")
+                        cancelar = b2.form_submit_button("Cancelar", use_container_width=True)
+
+                        if confirmar:
                             if not usr_sel:
                                 st.session_state.cron_msg = ("error", "Selecciona al menos un trabajador.")
                             else:
@@ -1072,7 +1111,7 @@ def admin_cronograma():
                                     usuario_ids=uid_list,
                                     empresa_id=r["empresa_id"],
                                     tarea_id=r["tarea_id"],
-                                    fecha_vencimiento=r["fecha_vencimiento"],  
+                                    fecha_vencimiento=r["fecha_vencimiento"],
                                     peso=peso,
                                 )
                                 if ok:
@@ -1081,13 +1120,9 @@ def admin_cronograma():
                                     st.session_state.cron_asig_id   = None
                                 else:
                                     st.session_state.cron_msg = ("error", f"Error: {result}")
-                            st.rerun()
-                    with b2:
-                        if st.button("Cancelar", use_container_width=True,
-                                     key=f"cancel_asig_{r['id']}"):
+                        if cancelar:
                             st.session_state.cron_asig_open = False
                             st.session_state.cron_asig_id   = None
-                            st.rerun()
 
         else:
             st.info(

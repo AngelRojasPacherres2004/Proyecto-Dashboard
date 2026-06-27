@@ -15,6 +15,11 @@ def _get_areas():
     return rows
 
 
+@st.cache_data(ttl=60)
+def _cached_get_areas():
+    return _get_areas()
+
+
 def _get_subareas(area_id: int):
     conn = get_connection()
     cur = conn.cursor()
@@ -25,6 +30,11 @@ def _get_subareas(area_id: int):
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
+
+
+@st.cache_data(ttl=60)
+def _cached_get_subareas(area_id: int):
+    return _get_subareas(area_id)
 
 
 def _get_usuarios():
@@ -48,6 +58,11 @@ def _get_usuarios():
     return rows
 
 
+@st.cache_data(ttl=30)
+def _cached_get_usuarios():
+    return _get_usuarios()
+
+
 def _get_usuario_by_id(uid: int):
     conn = get_connection()
     cur = conn.cursor()
@@ -60,6 +75,12 @@ def _get_usuario_by_id(uid: int):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
+
+
+def _clear_usuario_cache():
+    _cached_get_areas.clear()
+    _cached_get_subareas.clear()
+    _cached_get_usuarios.clear()
 
 
 def _crear_usuario(data: dict):
@@ -75,6 +96,7 @@ def _crear_usuario(data: dict):
         data["rol"], data["estado"]
     ))
     conn.commit()
+    _clear_usuario_cache()
     cur.close(); conn.close()
 
 
@@ -105,6 +127,7 @@ def _actualizar_usuario(uid: int, data: dict):
             data["rol"], data["estado"], uid
         ))
     conn.commit()
+    _clear_usuario_cache()
     cur.close(); conn.close()
 
 
@@ -113,6 +136,7 @@ def _cambiar_estado_usuario(uid: int, nuevo_estado: str):
     cur = conn.cursor()
     cur.execute("UPDATE usuarios SET estado=%s WHERE id=%s", (nuevo_estado, uid))
     conn.commit()
+    _clear_usuario_cache()
     cur.close(); conn.close()
 
 
@@ -121,6 +145,7 @@ def _eliminar_usuario(uid: int):
     cur = conn.cursor()
     cur.execute("DELETE FROM usuarios WHERE id = %s", (uid,))
     conn.commit()
+    _clear_usuario_cache()
     cur.close(); conn.close()
 
 
@@ -324,50 +349,46 @@ def admin_usuarios():
     #  FORMULARIO CREAR
     # ================================================================
     if st.session_state.modo_crud == "crear":
-        with st.container():
-            st.markdown("""
-            <div style="background:rgba(246,194,125,0.06);border:1px solid rgba(246,194,125,0.2);
-                        border-radius:16px;padding:20px 24px;margin-bottom:20px;">
-                <h4 style="color:#f6c27d;margin:0 0 16px;">Nuevo usuario</h4>
-            """, unsafe_allow_html=True)
+        st.markdown("""
+        <div style="background:rgba(246,194,125,0.06);border:1px solid rgba(246,194,125,0.2);
+                    border-radius:16px;padding:20px 24px;margin-bottom:20px;">
+            <h4 style="color:#f6c27d;margin:0 0 16px;">Nuevo usuario</h4>
+        </div>
+        """, unsafe_allow_html=True)
 
+        with st.form("crear_usuario_form", clear_on_submit=False):
             datos = _form_usuario(key_prefix="crear")
-
             c1, c2 = st.columns(2)
-            with c1:
-                if st.button("💾 Guardar", use_container_width=True, key="btn_guardar_crear"):
-                    errores = []
-                    if not datos["nom_res"]:  errores.append("Nombre completo requerido.")
-                    if not datos["alias"]:    errores.append("Alias requerido.")
-                    if not datos["usuario"]:  errores.append("Usuario requerido.")
-                    if not datos["password"]: errores.append("Contraseña requerida.")
-                    if datos["password"] and len(datos["password"]) < 8:
-                        errores.append("Contraseña debe tener mínimo 8 caracteres.")
-                    if _usuario_existe(datos["usuario"]):
-                        errores.append(f"El usuario '{datos['usuario']}' ya existe.")
+            guardar = c1.form_submit_button("💾 Guardar", use_container_width=True, type="primary")
+            cancelar = c2.form_submit_button("✖ Cancelar", use_container_width=True)
 
-                    if errores:
-                        st.session_state.crud_msg = ("error", " | ".join(errores))
-                    else:
-                        try:
-                            _crear_usuario(datos)
-                            st.session_state.crud_msg  = ("ok", f"✅ Usuario '{datos['alias']}' creado correctamente.")
-                            st.session_state.modo_crud = None
-                        except Exception as e:
-                            st.session_state.crud_msg = ("error", f"Error al crear: {e}")
-                    st.rerun()
+            if guardar:
+                errores = []
+                if not datos["nom_res"]:  errores.append("Nombre completo requerido.")
+                if not datos["alias"]:    errores.append("Alias requerido.")
+                if not datos["usuario"]:  errores.append("Usuario requerido.")
+                if not datos["password"]: errores.append("Contraseña requerida.")
+                if datos["password"] and len(datos["password"]) < 8:
+                    errores.append("Contraseña debe tener mínimo 8 caracteres.")
+                if _usuario_existe(datos["usuario"]):
+                    errores.append(f"El usuario '{datos['usuario']}' ya existe.")
 
-            with c2:
-                if st.button("✖ Cancelar", use_container_width=True, key="btn_cancel_crear"):
-                    st.session_state.modo_crud = None
-                    st.rerun()
-
-            st.markdown("</div>", unsafe_allow_html=True)
+                if errores:
+                    st.session_state.crud_msg = ("error", " | ".join(errores))
+                else:
+                    try:
+                        _crear_usuario(datos)
+                        st.session_state.crud_msg  = ("ok", f"✅ Usuario '{datos['alias']}' creado correctamente.")
+                        st.session_state.modo_crud = None
+                    except Exception as e:
+                        st.session_state.crud_msg = ("error", f"Error al crear: {e}")
+            if cancelar:
+                st.session_state.modo_crud = None
 
     # ================================================================
     #  TABLA DE USUARIOS
     # ================================================================
-    usuarios = _get_usuarios()
+    usuarios = _cached_get_usuarios()
 
     # Filtro de búsqueda
     if busqueda:
@@ -431,54 +452,48 @@ def admin_usuarios():
                         st.session_state.crud_msg = ("ok", f"✅ Usuario '{u['alias']}' ahora está {nuevo_estado}.")
                     except Exception as e:
                         st.session_state.crud_msg = ("error", f"Error al cambiar estado: {e}")
-                    st.rerun()
 
             with col7:
                 if st.button("🖍", key=f"edit_{u['id']}", help="Editar", use_container_width=True):
                     st.session_state.modo_crud  = "editar"
                     st.session_state.uid_editar = u["id"]
-                    st.rerun()
 
         # ── Formulario editar (inline bajo la fila) ──────────────
         if st.session_state.modo_crud == "editar" and st.session_state.uid_editar == u["id"]:
             prefill = _get_usuario_by_id(u["id"])
-            with st.container():
-                st.markdown(f"""
-                <div style="background:rgba(133,183,235,0.06);border:1px solid rgba(133,183,235,0.2);
-                            border-radius:16px;padding:20px 24px;margin:8px 0 16px;">
-                    <h4 style="color:#85B7EB;margin:0 0 16px;">Editando: {u['nom_res']}</h4>
-                """, unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style="background:rgba(133,183,235,0.06);border:1px solid rgba(133,183,235,0.2);
+                        border-radius:16px;padding:20px 24px;margin:8px 0 16px;">
+                <h4 style="color:#85B7EB;margin:0 0 16px;">Editando: {u['nom_res']}</h4>
+            </div>
+            """, unsafe_allow_html=True)
 
+            with st.form(f"edit_usuario_form_{u['id']}", clear_on_submit=False):
                 datos = _form_usuario(prefill=prefill, key_prefix=f"edit_{u['id']}")
-
                 e1, e2 = st.columns(2)
-                with e1:
-                    if st.button("💾 Actualizar", use_container_width=True, key=f"btn_upd_{u['id']}"):
-                        errores = []
-                        if not datos["nom_res"]: errores.append("Nombre requerido.")
-                        if not datos["alias"]:   errores.append("Alias requerido.")
-                        if not datos["usuario"]: errores.append("Usuario requerido.")
-                        if datos["nueva_password"] and len(datos["nueva_password"]) < 8:
-                            errores.append("Contraseña debe tener mínimo 8 caracteres.")
-                        if _usuario_existe(datos["usuario"], excluir_id=u["id"]):
-                            errores.append(f"El usuario '{datos['usuario']}' ya existe.")
+                actualizar = e1.form_submit_button("💾 Actualizar", use_container_width=True, type="primary")
+                cancelar = e2.form_submit_button("✖ Cancelar", use_container_width=True)
 
-                        if errores:
-                            st.session_state.crud_msg = ("error", " | ".join(errores))
-                        else:
-                            try:
-                                _actualizar_usuario(u["id"], datos)
-                                st.session_state.crud_msg  = ("ok", f"✔ Usuario '{datos['alias']}' actualizado.")
-                                st.session_state.modo_crud  = None
-                                st.session_state.uid_editar = None
-                            except Exception as e:
-                                st.session_state.crud_msg = ("error", f"Error al actualizar: {e}")
-                        st.rerun()
+                if actualizar:
+                    errores = []
+                    if not datos["nom_res"]: errores.append("Nombre requerido.")
+                    if not datos["alias"]:   errores.append("Alias requerido.")
+                    if not datos["usuario"]: errores.append("Usuario requerido.")
+                    if datos["nueva_password"] and len(datos["nueva_password"]) < 8:
+                        errores.append("Contraseña debe tener mínimo 8 caracteres.")
+                    if _usuario_existe(datos["usuario"], excluir_id=u["id"]):
+                        errores.append(f"El usuario '{datos['usuario']}' ya existe.")
 
-                with e2:
-                    if st.button("✖ Cancelar", use_container_width=True, key=f"btn_cancel_edit_{u['id']}"):
-                        st.session_state.modo_crud  = None
-                        st.session_state.uid_editar = None
-                        st.rerun()
-
-                st.markdown("</div>", unsafe_allow_html=True)
+                    if errores:
+                        st.session_state.crud_msg = ("error", " | ".join(errores))
+                    else:
+                        try:
+                            _actualizar_usuario(u["id"], datos)
+                            st.session_state.crud_msg  = ("ok", f"✔ Usuario '{datos['alias']}' actualizado.")
+                            st.session_state.modo_crud  = None
+                            st.session_state.uid_editar = None
+                        except Exception as e:
+                            st.session_state.crud_msg = ("error", f"Error al actualizar: {e}")
+                if cancelar:
+                    st.session_state.modo_crud  = None
+                    st.session_state.uid_editar = None

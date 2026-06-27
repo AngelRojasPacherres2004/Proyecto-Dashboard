@@ -14,6 +14,11 @@ def _get_proyectos():
     return rows
 
 
+@st.cache_data(ttl=60)
+def _cached_get_proyectos():
+    return _get_proyectos()
+
+
 def _get_tareas():
     conn = get_connection()
     cur = conn.cursor()
@@ -28,6 +33,11 @@ def _get_tareas():
     return rows
 
 
+@st.cache_data(ttl=30)
+def _cached_get_tareas():
+    return _get_tareas()
+
+
 def _get_tarea_by_id(tid: int):
     conn = get_connection()
     cur = conn.cursor()
@@ -35,6 +45,11 @@ def _get_tarea_by_id(tid: int):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
+
+
+def _clear_tarea_cache():
+    _cached_get_proyectos.clear()
+    _cached_get_tareas.clear()
 
 
 def _crear_tarea(data: dict):
@@ -45,6 +60,7 @@ def _crear_tarea(data: dict):
         VALUES (%s, %s)
     """, (data["nombre_tarea"], data["proyecto_id"]))
     conn.commit()
+    _clear_tarea_cache()
     cur.close(); conn.close()
 
 
@@ -56,6 +72,7 @@ def _actualizar_tarea(tid: int, data: dict):
         WHERE id=%s
     """, (data["nombre_tarea"], data["proyecto_id"], tid))
     conn.commit()
+    _clear_tarea_cache()
     cur.close(); conn.close()
 
 
@@ -64,6 +81,7 @@ def _eliminar_tarea(tid: int):
     cur = conn.cursor()
     cur.execute("DELETE FROM tareas WHERE id = %s", (tid,))
     conn.commit()
+    _clear_tarea_cache()
     cur.close(); conn.close()
 
 
@@ -182,11 +200,13 @@ def admin_tareas():
         </div>
         """, unsafe_allow_html=True)
 
-        datos = _form_tarea(key_prefix="crear")
+        with st.form("crear_tarea_form", clear_on_submit=False):
+            datos = _form_tarea(key_prefix="crear")
+            c1, c2 = st.columns(2)
+            guardar = c1.form_submit_button("💾 Guardar", use_container_width=True, type="primary")
+            cancelar = c2.form_submit_button("✖ Cancelar", use_container_width=True)
 
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("💾 Guardar", use_container_width=True, key="btn_crear_tar"):
+            if guardar:
                 errores = []
                 if not datos["nombre_tarea"]: errores.append("Nombre de tarea requerido.")
                 if not datos["proyecto_id"]:  errores.append("Proyecto requerido.")
@@ -203,16 +223,13 @@ def admin_tareas():
                         st.session_state.tar_modo = None
                     except Exception as e:
                         st.session_state.tar_msg = ("error", f"Error al crear: {e}")
-                st.rerun()
-        with c2:
-            if st.button("✖ Cancelar", use_container_width=True, key="btn_cancel_crear_tar"):
+            if cancelar:
                 st.session_state.tar_modo = None
-                st.rerun()
 
     # ================================================================
     #  TABLA DE TAREAS
     # ================================================================
-    tareas = _get_tareas()
+    tareas = _cached_get_tareas()
 
     if busqueda:
         q = busqueda.lower()
@@ -263,11 +280,9 @@ def admin_tareas():
                     if st.button("🖍", key=f"edit_tar_{t['id']}", help="Editar", use_container_width=True):
                         st.session_state.tar_modo      = "editar"
                         st.session_state.tar_id_editar = t["id"]
-                        st.rerun()
                 with col_del:
                     if st.button("🗑️", key=f"del_tar_{t['id']}", help="Eliminar", use_container_width=True):
                         st.session_state.tar_id_eliminar = t["id"]
-                        st.rerun()
 
         # ── Formulario editar inline ─────────────────────────────
         if st.session_state.tar_modo == "editar" and st.session_state.tar_id_editar == t["id"]:
@@ -279,11 +294,13 @@ def admin_tareas():
             </div>
             """, unsafe_allow_html=True)
 
-            datos = _form_tarea(prefill=prefill, key_prefix=f"edit_tar_{t['id']}")
+            with st.form(f"edit_tarea_form_{t['id']}", clear_on_submit=False):
+                datos = _form_tarea(prefill=prefill, key_prefix=f"edit_tar_{t['id']}")
+                e1, e2 = st.columns(2)
+                actualizar = e1.form_submit_button("💾 Actualizar", use_container_width=True, type="primary")
+                cancelar = e2.form_submit_button("✖ Cancelar", use_container_width=True)
 
-            e1, e2 = st.columns(2)
-            with e1:
-                if st.button("💾 Actualizar", use_container_width=True, key=f"btn_upd_tar_{t['id']}"):
+                if actualizar:
                     errores = []
                     if not datos["nombre_tarea"]: errores.append("Nombre de tarea requerido.")
                     if not datos["proyecto_id"]:  errores.append("Proyecto requerido.")
@@ -301,12 +318,9 @@ def admin_tareas():
                             st.session_state.tar_id_editar = None
                         except Exception as ex:
                             st.session_state.tar_msg = ("error", f"Error al actualizar: {ex}")
-                    st.rerun()
-            with e2:
-                if st.button("✖ Cancelar", use_container_width=True, key=f"btn_cancel_edit_tar_{t['id']}"):
+                if cancelar:
                     st.session_state.tar_modo      = None
                     st.session_state.tar_id_editar = None
-                    st.rerun()
 
         # ── Confirmación eliminar ────────────────────────────────
         if st.session_state.tar_id_eliminar == t["id"]:
@@ -332,8 +346,6 @@ def admin_tareas():
                         st.session_state.tar_id_eliminar = None
                     except Exception as ex:
                         st.session_state.tar_msg = ("error", f"No se puede eliminar: {ex}")
-                    st.rerun()
             with d2:
                 if st.button("✗ No, cancelar", use_container_width=True, key=f"cancel_del_tar_{t['id']}"):
                     st.session_state.tar_id_eliminar = None
-                    st.rerun()
