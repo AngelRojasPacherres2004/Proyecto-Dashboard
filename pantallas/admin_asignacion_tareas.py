@@ -129,7 +129,7 @@ def _get_asignaciones(mes=None, anio=None, solo_completadas=False):
         JOIN tareas    t ON a.tarea_id    = t.id
         JOIN proyectos p ON t.proyecto_id = p.id
         {where_sql}
-        ORDER BY a.fecha_meta ASC, a.id ASC, a.usuario_id ASC
+        ORDER BY a.fecha_meta DESC, a.id DESC, a.usuario_id ASC
     """, params)
     rows = cur.fetchall()
     cur.close(); conn.close()
