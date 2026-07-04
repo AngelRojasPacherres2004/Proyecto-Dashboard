@@ -535,18 +535,277 @@ async function deleteAssignment(id) {
   }
 }
 
+const monthTokens = {
+  ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6,
+  jul: 7, ago: 8, set: 9, sep: 9, oct: 10, nov: 11, dic: 12,
+};
+const scheduleGroups = ["0", "1", "23", "45", "67", "89"];
+
+function dateISO(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function parsePeriod(text, forcedYear) {
+  const normalized = text.toLowerCase().replace(/\*/g, "").trim();
+  const match = normalized.match(/\b(ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|set(?:iembre)?|sep(?:tiembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?:\s*[-/]\s*|\s+)?(\d{2,4})?\b/i);
+  if (!match) return null;
+  const month = monthTokens[match[1].slice(0, 3).toLowerCase()];
+  const rawYear = match[2] ? Number(match[2]) : forcedYear;
+  return { month, year: rawYear < 100 ? 2000 + rawYear : rawYear };
+}
+
+function parseDates(text, fallbackYear) {
+  const dates = [];
+  const regex = /\b(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|set|sep|oct|nov|dic)[a-záéíóúñ.]*\s*(\d{2,4})?\b/gi;
+  for (const match of text.matchAll(regex)) {
+    const day = Number(match[1]);
+    const month = monthTokens[match[2].slice(0, 3).toLowerCase()];
+    let year = match[3] ? Number(match[3]) : fallbackYear;
+    if (year < 100) year += 2000;
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day) {
+      dates.push(dateISO(date));
+    }
+  }
+  return dates;
+}
+
+async function extractScheduleFromPdf(buffer, forcedYear) {
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const loadingTask = getDocument({
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+    useSystemFonts: true,
+  });
+  const document = await loadingTask.promise;
+  const schedule = new Map();
+
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const visualRows = [];
+    for (const item of content.items) {
+      const text = item.str?.replace(/\s+/g, " ").trim();
+      if (!text) continue;
+      const x = item.transform?.[4] || 0;
+      const y = item.transform?.[5] || 0;
+      let row = visualRows.find((candidate) => Math.abs(candidate.y - y) <= 3);
+      if (!row) {
+        row = { y, items: [] };
+        visualRows.push(row);
+      }
+      row.items.push({ x, text });
+    }
+    visualRows.sort((a, b) => b.y - a.y);
+    for (let index = 0; index < visualRows.length; index += 1) {
+      const row = visualRows[index];
+      const rowText = row.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(" ");
+      const period = parsePeriod(rowText, forcedYear);
+      if (!period || period.year !== Number(forcedYear)) continue;
+      const dueYear = period.month === 12 ? period.year + 1 : period.year;
+      let dates = parseDates(rowText, dueYear);
+
+      for (let offset = 1; dates.length < 6 && offset <= 2 && visualRows[index + offset]; offset += 1) {
+        const next = visualRows[index + offset];
+        if (row.y - next.y > 20) break;
+        const nextText = next.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(" ");
+        if (parsePeriod(nextText, forcedYear)) break;
+        dates = parseDates(`${rowText} ${nextText}`, dueYear);
+      }
+      if (dates.length < 6) continue;
+      schedule.set(`${period.year}-${period.month}`, Object.fromEntries(
+        scheduleGroups.map((group, groupIndex) => [group, dates[groupIndex]]),
+      ));
+    }
+  }
+  await document.cleanup();
+  await loadingTask.destroy();
+  return schedule;
+}
+
+function rucGroup(ruc) {
+  const digit = String(ruc || "").slice(-1);
+  if (digit === "0" || digit === "1") return digit;
+  if (digit === "2" || digit === "3") return "23";
+  if (digit === "4" || digit === "5") return "45";
+  if (digit === "6" || digit === "7") return "67";
+  if (digit === "8" || digit === "9") return "89";
+  return null;
+}
+
+function easterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function peruHolidays(year) {
+  const fixed = [
+    [1, 1], [5, 1], [6, 7], [6, 29], [7, 23], [7, 28], [7, 29],
+    [8, 6], [8, 30], [10, 8], [11, 1], [12, 8], [12, 9], [12, 25],
+  ];
+  const values = new Set(fixed.map(([month, day]) => `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`));
+  const easter = easterSunday(year);
+  for (const daysBefore of [3, 2]) {
+    const holiday = new Date(easter);
+    holiday.setUTCDate(holiday.getUTCDate() - daysBefore);
+    values.add(dateISO(holiday));
+  }
+  return values;
+}
+
+function subtractBusinessDays(dateValue, daysBefore) {
+  const date = new Date(`${dateValue}T00:00:00Z`);
+  let remaining = Number(daysBefore);
+  while (remaining > 0) {
+    date.setUTCDate(date.getUTCDate() - 1);
+    const weekday = date.getUTCDay();
+    const holidays = peruHolidays(date.getUTCFullYear());
+    if (weekday !== 0 && weekday !== 6 && !holidays.has(dateISO(date))) remaining -= 1;
+  }
+  return dateISO(date);
+}
+
+async function previewPdfSchedule(event) {
+  const data = bodyOf(event);
+  requireFields(data, ["kind", "file_base64", "year", "months", "days_before"]);
+  if (!["pdt", "le"].includes(data.kind)) {
+    throw Object.assign(new Error("El tipo de cronograma no es válido."), { status: 400 });
+  }
+  if (!Array.isArray(data.months) || !data.months.length) {
+    throw Object.assign(new Error("Selecciona al menos un periodo."), { status: 400 });
+  }
+  const year = Number(data.year);
+  const months = [...new Set(data.months.map(Number))];
+  const daysBefore = Number(data.days_before);
+  if (!Number.isInteger(year) || year < 2024 || year > 2100) {
+    throw Object.assign(new Error("El año del cronograma no es válido."), { status: 400 });
+  }
+  if (months.some((month) => !Number.isInteger(month) || month < 1 || month > 12)) {
+    throw Object.assign(new Error("Uno de los periodos seleccionados no es válido."), { status: 400 });
+  }
+  if (!Number.isInteger(daysBefore) || daysBefore < 1 || daysBefore > 10) {
+    throw Object.assign(new Error("Los días hábiles deben estar entre 1 y 10."), { status: 400 });
+  }
+  const base64 = String(data.file_base64).replace(/^data:application\/pdf;base64,/, "");
+  const buffer = Buffer.from(base64, "base64");
+  if (!buffer.length || buffer.length > 4 * 1024 * 1024 || buffer.subarray(0, 4).toString() !== "%PDF") {
+    throw Object.assign(new Error("El PDF no es válido o supera el límite de 4 MB."), { status: 400 });
+  }
+  const parsed = await extractScheduleFromPdf(buffer, year);
+  if (!parsed.size) {
+    throw Object.assign(new Error("No se reconoció la tabla del cronograma. Verifica que sea el PDF oficial de SUNAT y que contenga texto seleccionable."), { status: 422 });
+  }
+
+  const taskSql = data.kind === "pdt"
+    ? `SELECT t.id,t.nombre_tarea,p.nombre_proyecto FROM tareas t
+       JOIN proyectos p ON p.id=t.proyecto_id
+       WHERE t.nombre_tarea ILIKE '%PDT%621%'
+       ORDER BY p.nombre_proyecto,t.nombre_tarea`
+    : `SELECT t.id,t.nombre_tarea,p.nombre_proyecto FROM tareas t
+       JOIN proyectos p ON p.id=t.proyecto_id
+       WHERE t.nombre_tarea ILIKE '%LE%V-C%VALIDACION%'
+          OR (t.nombre_tarea ILIKE '%LE%V-C%' AND t.nombre_tarea NOT ILIKE '%VALIDACION%')
+       ORDER BY CASE WHEN t.nombre_tarea ILIKE '%VALIDACION%' THEN 1 ELSE 2 END,t.nombre_tarea`;
+  const [tasksResult, companiesResult, existingResult] = await Promise.all([
+    pool.query(taskSql),
+    pool.query("SELECT id,alias,razon_social,ruc FROM empresas WHERE estado_contrato='Activo' ORDER BY razon_social"),
+    pool.query(
+      "SELECT empresa_id,tarea_id,periodo_anio,periodo_mes FROM cronograma_pdt WHERE periodo_anio=$1 AND periodo_mes=ANY($2::int[])",
+      [year, months],
+    ),
+  ]);
+  if (!tasksResult.rows.length) {
+    throw Object.assign(new Error(data.kind === "pdt"
+      ? "No se encontró una tarea PDT 621 en el catálogo."
+      : "No se encontraron las tareas LE V-C y LE V-C VALIDACION en el catálogo."), { status: 422 });
+  }
+  const existing = new Set(existingResult.rows.map((row) => `${row.empresa_id}-${row.tarea_id}-${row.periodo_anio}-${row.periodo_mes}`));
+  const rows = [];
+  for (const month of months.sort((a, b) => a - b)) {
+    const dates = parsed.get(`${year}-${month}`);
+    if (!dates) continue;
+    for (const company of companiesResult.rows) {
+      const sunatDate = dates[rucGroup(company.ruc)];
+      if (!sunatDate) continue;
+      for (const task of tasksResult.rows) {
+        const key = `${company.id}-${task.id}-${year}-${month}`;
+        rows.push({
+          empresa_id: company.id,
+          empresa: company.alias,
+          razon_social: company.razon_social,
+          ruc: company.ruc,
+          tarea_id: task.id,
+          tarea: task.nombre_tarea,
+          periodo_mes: month,
+          periodo_anio: year,
+          fecha_sunat: sunatDate,
+          fecha_vencimiento: subtractBusinessDays(sunatDate, daysBefore),
+          exists: existing.has(key),
+        });
+      }
+    }
+  }
+  return {
+    rows,
+    taskNames: tasksResult.rows.map((task) => task.nombre_tarea),
+    parsedPeriods: [...parsed.keys()],
+    newCount: rows.filter((row) => !row.exists).length,
+    existingCount: rows.filter((row) => row.exists).length,
+  };
+}
+
 async function listSchedule(event) {
   const query = event.queryStringParameters || {};
   const month = Number(query.month || new Date().getMonth() + 1);
   const year = Number(query.year || new Date().getFullYear());
   const { rows } = await pool.query(`
-    SELECT cp.id,cp.periodo_mes,cp.periodo_anio,cp.fecha_vencimiento,cp.asignado,
-      e.id empresa_id,e.alias empresa,e.razon_social,e.ruc,
-      t.id tarea_id,t.nombre_tarea tarea,p.nombre_proyecto proyecto
-    FROM cronograma_pdt cp JOIN empresas e ON e.id=cp.empresa_id
-    JOIN tareas t ON t.id=cp.tarea_id JOIN proyectos p ON p.id=t.proyecto_id
-    WHERE cp.periodo_mes=$1 AND cp.periodo_anio=$2
-    ORDER BY cp.fecha_vencimiento,e.alias`, [month, year]);
+    WITH pdf_rows AS (
+      SELECT cp.id::text id,cp.periodo_mes,cp.periodo_anio,cp.fecha_vencimiento,
+        EXISTS (
+          SELECT 1 FROM asignaciones a
+          WHERE a.empresa_id=cp.empresa_id AND a.tarea_id=cp.tarea_id
+            AND a.fecha_meta=cp.fecha_vencimiento
+        ) asignado,
+        e.id empresa_id,e.alias empresa,e.razon_social,e.ruc,
+        t.id tarea_id,t.nombre_tarea tarea,p.nombre_proyecto proyecto,'pdf' origen
+      FROM cronograma_pdt cp JOIN empresas e ON e.id=cp.empresa_id
+      JOIN tareas t ON t.id=cp.tarea_id JOIN proyectos p ON p.id=t.proyecto_id
+      WHERE cp.periodo_mes=$1 AND cp.periodo_anio=$2
+    ), manual_rows AS (
+      SELECT DISTINCT ON (a.id)
+        'manual_'||a.id::text id,
+        EXTRACT(MONTH FROM a.fecha_meta)::int periodo_mes,
+        EXTRACT(YEAR FROM a.fecha_meta)::int periodo_anio,
+        a.fecha_meta fecha_vencimiento,TRUE asignado,
+        e.id empresa_id,e.alias empresa,e.razon_social,e.ruc,
+        t.id tarea_id,t.nombre_tarea tarea,p.nombre_proyecto proyecto,'manual' origen
+      FROM asignaciones a JOIN empresas e ON e.id=a.empresa_id
+      JOIN tareas t ON t.id=a.tarea_id JOIN proyectos p ON p.id=t.proyecto_id
+      WHERE EXTRACT(MONTH FROM a.fecha_meta)=$1 AND EXTRACT(YEAR FROM a.fecha_meta)=$2
+        AND NOT EXISTS (
+          SELECT 1 FROM cronograma_pdt cp
+          WHERE cp.empresa_id=a.empresa_id AND cp.tarea_id=a.tarea_id
+            AND cp.fecha_vencimiento=a.fecha_meta
+        )
+      ORDER BY a.id,a.usuario_id
+    )
+    SELECT * FROM pdf_rows
+    UNION ALL
+    SELECT * FROM manual_rows
+    ORDER BY fecha_vencimiento,empresa`, [month, year]);
   return rows;
 }
 
@@ -805,6 +1064,7 @@ export async function handler(event) {
     }
 
     if (path === "/schedule" && method === "GET") return json(200, await listSchedule(event));
+    if (path === "/schedule/preview-pdf" && method === "POST") return json(200, await previewPdfSchedule(event));
     if (path === "/schedule/import" && method === "POST") return json(200, await importSchedule(event));
     const scheduleAssignMatch = path.match(/^\/schedule\/(\d+)\/assign$/);
     if (scheduleAssignMatch && method === "POST") {

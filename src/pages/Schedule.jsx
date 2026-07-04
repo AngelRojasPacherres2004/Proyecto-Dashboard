@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Plus, Printer, Sparkles, UserPlus } from "lucide-react";
-import { api } from "../lib/api";
+import { BookOpenCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, FileText, Plus, Printer, Sparkles, Upload, UserPlus, X } from "lucide-react";
+import { api, formatDate } from "../lib/api";
 import { EmptyState, Field, Loading, Modal, Notice, PageHeader, StatusBadge } from "../components/UI";
 
 const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
@@ -22,10 +22,152 @@ function groupForRuc(ruc) {
   return null;
 }
 
+async function fileToBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 32_768) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 32_768));
+  }
+  return btoa(binary);
+}
+
+function PdfImporter({ kind, onImported }) {
+  const today = new Date();
+  const [file, setFile] = useState(null);
+  const [year, setYear] = useState(today.getFullYear());
+  const [months, setMonths] = useState([today.getMonth() + 1]);
+  const [daysBefore, setDaysBefore] = useState(3);
+  const [inputKey, setInputKey] = useState(0);
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const isPdt = kind === "pdt";
+
+  const toggleMonth = (month) => {
+    setMonths((current) => current.includes(month)
+      ? current.filter((value) => value !== month)
+      : [...current, month]);
+    setPreview(null);
+  };
+  const selectFile = (event) => {
+    const selected = event.target.files?.[0] || null;
+    if (selected && selected.size > 4 * 1024 * 1024) {
+      setNotice({ type: "error", text: "El PDF supera el límite de 4 MB." });
+      event.target.value = "";
+      return;
+    }
+    setFile(selected);
+    setPreview(null);
+    setNotice(null);
+  };
+  const analyze = async (event) => {
+    event.preventDefault();
+    if (!file || !months.length) return;
+    setBusy(true); setNotice(null);
+    try {
+      const result = await api("/schedule/preview-pdf", {
+        method: "POST",
+        body: {
+          kind,
+          file_base64: await fileToBase64(file),
+          year: Number(year),
+          months,
+          days_before: Number(daysBefore),
+        },
+      });
+      setPreview(result);
+      if (!result.rows.length) {
+        setNotice({ type: "error", text: "El PDF fue leído, pero no contiene fechas para los periodos seleccionados." });
+      }
+    } catch (error) {
+      setNotice({ type: "error", text: error.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirm = async () => {
+    const rows = preview.rows.filter((row) => !row.exists).map((row) => ({
+      tarea_id: row.tarea_id,
+      empresa_id: row.empresa_id,
+      periodo_mes: row.periodo_mes,
+      periodo_anio: row.periodo_anio,
+      fecha_vencimiento: row.fecha_vencimiento,
+    }));
+    setBusy(true); setNotice(null);
+    try {
+      const result = await api("/schedule/import", { method: "POST", body: { rows } });
+      setNotice({ type: "success", text: `${result.inserted} registros importados correctamente; ${result.skipped} omitidos.` });
+      setPreview(null);
+      setFile(null);
+      setInputKey((current) => current + 1);
+      onImported(Math.min(...months), Number(year));
+    } catch (error) {
+      setNotice({ type: "error", text: error.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="pdf-importer">
+      <div className="pdf-importer__hero">
+        <span>{isPdt ? <FileText size={24} /> : <BookOpenCheck size={24} />}</span>
+        <div>
+          <small>Importación automática desde SUNAT</small>
+          <h2>{isPdt ? "Cronograma PDT 621" : "Cronograma de Libros Electrónicos"}</h2>
+          <p>{isPdt
+            ? "Sube el PDF oficial. Se aplicará la fecha correspondiente al último dígito del RUC de cada empresa."
+            : "Un solo PDF genera simultáneamente los registros de LE V-C VALIDACION y LE V-C."}</p>
+        </div>
+      </div>
+      {notice && <Notice type={notice.type} onClose={() => setNotice(null)}>{notice.text}</Notice>}
+      <form onSubmit={analyze} className="pdf-importer__form panel">
+        <div className="pdf-config">
+          <Field label="Año del cronograma"><input type="number" min="2024" max="2100" value={year} onChange={(event) => { setYear(event.target.value); setPreview(null); }} /></Field>
+          <Field label="Días hábiles antes de SUNAT"><input type="number" min="1" max="10" value={daysBefore} onChange={(event) => { setDaysBefore(event.target.value); setPreview(null); }} /></Field>
+        </div>
+        <div className="field"><span>Periodos a importar</span>
+          <div className="month-picker">{monthNames.map((name, index) => <button type="button" key={name} className={months.includes(index + 1) ? "selected" : ""} onClick={() => toggleMonth(index + 1)}>{name.slice(0, 3)}</button>)}</div>
+        </div>
+        <label className={`pdf-dropzone ${file ? "has-file" : ""}`}>
+          <input key={inputKey} type="file" accept="application/pdf,.pdf" onChange={selectFile} />
+          {file ? <><span><FileText size={22} /></span><div><strong>{file.name}</strong><small>{(file.size / 1024).toFixed(0)} KB · Listo para analizar</small></div><button type="button" onClick={(event) => { event.preventDefault(); setFile(null); setPreview(null); setInputKey((current) => current + 1); }}><X size={17} /></button></>
+            : <><span><Upload size={22} /></span><div><strong>Selecciona el PDF del cronograma</strong><small>Documento oficial de SUNAT · Máximo 4 MB</small></div></>}
+        </label>
+        <div className="pdf-help"><Sparkles size={17} /><span>Las fechas se ajustarán <strong>{daysBefore} días hábiles antes</strong>, respetando fines de semana y feriados nacionales.</span></div>
+        <button className="button button--primary" disabled={busy || !file || !months.length}>{busy ? "Leyendo y validando PDF…" : "Leer PDF y generar vista previa"}</button>
+      </form>
+
+      {preview?.rows?.length > 0 && <section className="pdf-preview panel">
+        <header className="panel__header"><div><h2>Vista previa de importación</h2><p>{preview.rows.length} coincidencias encontradas en el documento</p></div>
+          <div className="preview-counts"><span>{preview.newCount} nuevos</span><span>{preview.existingCount} existentes</span></div>
+        </header>
+        <div className="imported-tasks">{preview.taskNames.map((name) => <span key={name}>{name}</span>)}</div>
+        <div className="pdf-preview__table">
+          <div className="pdf-preview__head"><span>Periodo</span><span>Empresa / RUC</span><span>Tarea</span><span>Fecha SUNAT</span><span>Fecha programada</span><span>Estado</span></div>
+          {preview.rows.map((row, index) => <div className="pdf-preview__row" key={`${row.empresa_id}-${row.tarea_id}-${row.periodo_mes}-${index}`}>
+            <strong>{monthNames[row.periodo_mes - 1]} {row.periodo_anio}</strong>
+            <div><strong>{row.empresa}</strong><small>{row.ruc}</small></div>
+            <span>{row.tarea}</span>
+            <span>{formatDate(row.fecha_sunat)}</span>
+            <strong>{formatDate(row.fecha_vencimiento)}</strong>
+            <StatusBadge value={row.exists ? "Ya existe" : "Nuevo"} />
+          </div>)}
+        </div>
+        <div className="pdf-preview__actions">
+          <button className="button button--ghost" onClick={() => setPreview(null)}>Limpiar vista previa</button>
+          <button className="button button--primary" disabled={busy || !preview.newCount} onClick={confirm}>{busy ? "Importando…" : `Confirmar ${preview.newCount} registros`}</button>
+        </div>
+      </section>}
+    </section>
+  );
+}
+
 export default function Schedule({ references }) {
   const today = new Date();
   const [cursor, setCursor] = useState({ month: today.getMonth() + 1, year: today.getFullYear() });
   const [items, setItems] = useState(null);
+  const [view, setView] = useState("calendar");
   const [generator, setGenerator] = useState(null);
   const [assigning, setAssigning] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -86,8 +228,14 @@ export default function Schedule({ references }) {
   return (
     <>
       <PageHeader eyebrow="Planificación tributaria" title="Cronograma" subtitle="Convierte fechas SUNAT en trabajo organizado para el equipo."
-        action={<div className="header-actions"><button className="button button--ghost" onClick={() => window.print()}><Printer size={17} />Imprimir</button><button className="button button--primary" onClick={() => setGenerator({ tarea_id: "", periodo_mes: cursor.month, periodo_anio: cursor.year, dates: { ...initialDates } })}><Sparkles size={17} />Generar vencimientos</button></div>} />
+        action={view === "calendar" ? <div className="header-actions"><button className="button button--ghost" onClick={() => window.print()}><Printer size={17} />Imprimir</button><button className="button button--primary" onClick={() => setGenerator({ tarea_id: "", periodo_mes: cursor.month, periodo_anio: cursor.year, dates: { ...initialDates } })}><Sparkles size={17} />Generar manualmente</button></div> : null} />
       {notice && <Notice type={notice.type} onClose={() => setNotice(null)}>{notice.text}</Notice>}
+      <nav className="schedule-tabs">
+        <button className={view === "calendar" ? "active" : ""} onClick={() => setView("calendar")}><CalendarDays size={17} /><span>Calendario</span></button>
+        <button className={view === "pdt" ? "active" : ""} onClick={() => setView("pdt")}><FileText size={17} /><span>Importar PDT 621</span></button>
+        <button className={view === "le" ? "active" : ""} onClick={() => setView("le")}><BookOpenCheck size={17} /><span>Importar Libros Electrónicos</span></button>
+      </nav>
+      {view === "calendar" && <>
       <section className="calendar-panel">
         <header className="calendar-toolbar">
           <button onClick={() => moveMonth(-1)}><ChevronLeft size={20} /></button>
@@ -117,6 +265,9 @@ export default function Schedule({ references }) {
           {!item.asignado ? <button className="button button--soft button--small" onClick={() => setAssigning({ ...item, usuario_ids: [], peso: 1 })}><UserPlus size={16} />Asignar</button> : <span className="assigned-check"><CheckCircle2 size={17} />Listo</span>}
         </div>) : items && <EmptyState icon={CalendarDays} title="Este mes aún está libre" text="Genera los vencimientos usando las fechas publicadas por SUNAT." />}
       </section>
+      </>}
+      {view === "pdt" && <PdfImporter kind="pdt" onImported={(month, year) => { setCursor({ month, year }); setView("calendar"); }} />}
+      {view === "le" && <PdfImporter kind="le" onImported={(month, year) => { setCursor({ month, year }); setView("calendar"); }} />}
 
       <Modal open={!!generator} onClose={() => setGenerator(null)} title="Generar vencimientos" subtitle="Transcribe una vez las fechas de la tabla SUNAT; Nexo las aplica según el último dígito del RUC." wide>
         {generator && <form onSubmit={generate} className="form-grid">
