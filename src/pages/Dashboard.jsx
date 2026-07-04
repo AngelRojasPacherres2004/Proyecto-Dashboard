@@ -8,7 +8,7 @@ import { api, formatDate } from "../lib/api";
 import { Loading, Notice, PageHeader } from "../components/UI";
 
 const palette = { completada: "#2f9e78", pendiente: "#e3a33b", vencida: "#db6a66" };
-const tooltipStyle = { border: "1px solid #e4e8ee", borderRadius: 12, boxShadow: "0 12px 30px rgba(26,38,54,.12)", fontSize: 12 };
+const tooltipStyle = { color: "#f3eee5", background: "#171719", border: "1px solid rgba(206,169,92,.3)", borderRadius: 12, boxShadow: "0 12px 30px rgba(0,0,0,.35)", fontSize: 12 };
 
 function Metric({ icon: Icon, label, value, note, tone }) {
   return (
@@ -45,12 +45,12 @@ export default function Dashboard() {
           <div className="chart chart--large">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data.trend}>
-                <defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#477dbe" stopOpacity={.28} /><stop offset="100%" stopColor="#477dbe" stopOpacity={.02} /></linearGradient></defs>
-                <CartesianGrid stroke="#edf0f4" vertical={false} />
-                <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{ fill: "#7a8595", fontSize: 11 }} />
-                <YAxis axisLine={false} tickLine={false} allowDecimals={false} tick={{ fill: "#7a8595", fontSize: 11 }} />
+                <defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#cda85f" stopOpacity={.32} /><stop offset="100%" stopColor="#cda85f" stopOpacity={.02} /></linearGradient></defs>
+                <CartesianGrid stroke="#2a2926" vertical={false} />
+                <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{ fill: "#9f9789", fontSize: 11 }} />
+                <YAxis axisLine={false} tickLine={false} allowDecimals={false} tick={{ fill: "#9f9789", fontSize: 11 }} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Area type="monotone" dataKey="completadas" stroke="#477dbe" strokeWidth={2.5} fill="url(#trendFill)" />
+                <Area type="monotone" dataKey="completadas" stroke="#d6b56f" strokeWidth={2.5} fill="url(#trendFill)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -72,9 +72,9 @@ export default function Dashboard() {
           <div className="chart chart--medium">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.workload} barGap={2}>
-                <CartesianGrid stroke="#edf0f4" vertical={false} />
-                <XAxis dataKey="nombre" axisLine={false} tickLine={false} tick={{ fill: "#7a8595", fontSize: 11 }} />
-                <YAxis axisLine={false} tickLine={false} allowDecimals={false} tick={{ fill: "#7a8595", fontSize: 11 }} />
+                <CartesianGrid stroke="#2a2926" vertical={false} />
+                <XAxis dataKey="nombre" axisLine={false} tickLine={false} tick={{ fill: "#9f9789", fontSize: 11 }} />
+                <YAxis axisLine={false} tickLine={false} allowDecimals={false} tick={{ fill: "#9f9789", fontSize: 11 }} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Bar dataKey="completadas" stackId="a" fill="#2f9e78" radius={[0, 0, 4, 4]} />
                 <Bar dataKey="pendientes" stackId="a" fill="#e3a33b" />
