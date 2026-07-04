@@ -42,6 +42,9 @@ const headers = {
 };
 const loginAttempts = new Map();
 const assignmentStates = new Set(["pendiente", "completada", "vencida"]);
+const userRoles = new Set(["admin", "trabajador"]);
+const userStates = new Set(["activo", "inactivo"]);
+const companyStates = new Set(["Activo", "Inactivo", "Suspendido"]);
 
 function json(statusCode, body, extraHeaders = {}) {
   return { statusCode, headers: { ...headers, ...extraHeaders }, body: JSON.stringify(body) };
@@ -72,6 +75,125 @@ function requireFields(data, fields) {
 function requireAssignmentState(value) {
   if (!assignmentStates.has(value)) {
     throw Object.assign(new Error("El estado de la asignación no es válido."), { status: 400 });
+  }
+}
+
+function cleanText(value) {
+  return String(value ?? "").trim();
+}
+
+function isISODate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validateUserPayload(data, creating = false) {
+  requireFields(data, ["nom_res", "alias", "usuario", "rol", "estado"]);
+  if (cleanText(data.nom_res).length < 3 || cleanText(data.alias).length < 2 || cleanText(data.usuario).length < 3) {
+    throw Object.assign(new Error("Nombre, alias y usuario deben contener información válida."), { status: 400 });
+  }
+  if (!/^[a-zA-Z0-9._-]+$/.test(cleanText(data.usuario))) {
+    throw Object.assign(new Error("El usuario solo puede contener letras, números, punto, guion y guion bajo."), { status: 400 });
+  }
+  if (!userRoles.has(data.rol) || !userStates.has(data.estado)) {
+    throw Object.assign(new Error("El rol o estado del usuario no es válido."), { status: 400 });
+  }
+  if ((creating || data.password) && String(data.password || "").length < 6) {
+    throw Object.assign(new Error("La contraseña debe tener al menos 6 caracteres."), { status: 400 });
+  }
+}
+
+function validateCompanyPayload(data) {
+  requireFields(data, ["alias", "razon_social", "ruc", "estado_contrato"]);
+  if (cleanText(data.alias).length < 2 || cleanText(data.razon_social).length < 3) {
+    throw Object.assign(new Error("El alias y la razón social deben contener información válida."), { status: 400 });
+  }
+  if (!/^\d{11}$/.test(cleanText(data.ruc))) {
+    throw Object.assign(new Error("El RUC debe contener exactamente 11 dígitos."), { status: 400 });
+  }
+  if (!companyStates.has(data.estado_contrato)) {
+    throw Object.assign(new Error("El estado del contrato no es válido."), { status: 400 });
+  }
+  if (data.fecha_contrato && !isISODate(data.fecha_contrato)) {
+    throw Object.assign(new Error("La fecha del contrato no es válida."), { status: 400 });
+  }
+  if (data.correo_principal && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.correo_principal)) {
+    throw Object.assign(new Error("El correo principal no es válido."), { status: 400 });
+  }
+}
+
+function validateAssignmentPayload(data) {
+  requireFields(data, ["usuario_ids", "empresa_id", "tarea_id", "fecha_meta"]);
+  if (!Array.isArray(data.usuario_ids) || !data.usuario_ids.length) {
+    throw Object.assign(new Error("Selecciona al menos un trabajador."), { status: 400 });
+  }
+  const usuarioIds = [...new Set(data.usuario_ids.map(Number))];
+  if (usuarioIds.some((id) => !Number.isInteger(id) || id < 1)) {
+    throw Object.assign(new Error("Uno de los trabajadores seleccionados no es válido."), { status: 400 });
+  }
+  const empresaId = Number(data.empresa_id);
+  const tareaId = Number(data.tarea_id);
+  const peso = Number(data.peso ?? 1);
+  if (!Number.isInteger(empresaId) || empresaId < 1 || !Number.isInteger(tareaId) || tareaId < 1) {
+    throw Object.assign(new Error("La empresa o tarea seleccionada no es válida."), { status: 400 });
+  }
+  if (!isISODate(data.fecha_meta)) {
+    throw Object.assign(new Error("La fecha meta no es válida."), { status: 400 });
+  }
+  if (!Number.isInteger(peso) || peso < 1 || peso > 10) {
+    throw Object.assign(new Error("El peso de la tarea debe estar entre 1 y 10."), { status: 400 });
+  }
+  return { usuarioIds, empresaId, tareaId, peso };
+}
+
+async function synchronizeOperationalStates(db = pool) {
+  const expired = await db.query(
+    "UPDATE asignaciones SET estado='vencida' WHERE estado='pendiente' AND fecha_meta<CURRENT_DATE",
+  );
+  const schedule = await db.query(`
+    UPDATE cronograma_pdt cp
+    SET asignado=EXISTS(
+      SELECT 1 FROM asignaciones a
+      WHERE a.empresa_id=cp.empresa_id
+        AND a.tarea_id=cp.tarea_id
+        AND a.fecha_meta=cp.fecha_vencimiento
+    )
+    WHERE cp.asignado IS DISTINCT FROM EXISTS(
+      SELECT 1 FROM asignaciones a
+      WHERE a.empresa_id=cp.empresa_id
+        AND a.tarea_id=cp.tarea_id
+        AND a.fecha_meta=cp.fecha_vencimiento
+    )`);
+  return { expired: expired.rowCount, schedule: schedule.rowCount };
+}
+
+async function ensureAssignmentReferences(client, data, normalized, excludedAssignmentId = null) {
+  const users = await client.query(
+    "SELECT id FROM usuarios WHERE id=ANY($1::int[]) AND rol='trabajador' AND estado='activo'",
+    [normalized.usuarioIds],
+  );
+  const company = await client.query(
+    "SELECT id FROM empresas WHERE id=$1 AND estado_contrato='Activo'",
+    [normalized.empresaId],
+  );
+  const task = await client.query("SELECT id FROM tareas WHERE id=$1", [normalized.tareaId]);
+  const duplicates = await client.query(`
+    SELECT usuario_id FROM asignaciones
+    WHERE usuario_id=ANY($1::int[]) AND empresa_id=$2 AND tarea_id=$3 AND fecha_meta=$4
+      AND ($5::int IS NULL OR id<>$5)`,
+  [normalized.usuarioIds, normalized.empresaId, normalized.tareaId, data.fecha_meta, excludedAssignmentId]);
+  if (users.rowCount !== normalized.usuarioIds.length) {
+    throw Object.assign(new Error("Todos los responsables deben ser trabajadores activos."), { status: 400 });
+  }
+  if (!company.rowCount) {
+    throw Object.assign(new Error("La empresa seleccionada no está activa o no existe."), { status: 400 });
+  }
+  if (!task.rowCount) {
+    throw Object.assign(new Error("La tarea seleccionada no existe."), { status: 400 });
+  }
+  if (duplicates.rowCount) {
+    throw Object.assign(new Error("Uno de los trabajadores ya tiene esta misma tarea asignada para esa fecha."), { status: 409 });
   }
 }
 
@@ -216,6 +338,7 @@ async function login(event) {
 }
 
 async function getDashboard() {
+  await synchronizeOperationalStates();
   const [summary, states, workload, companies, trend, regimes, projects, dueSoon] = await Promise.all([
     pool.query(`
       SELECT
@@ -302,22 +425,45 @@ async function listUsers() {
 
 async function createUser(event) {
   const data = bodyOf(event);
-  requireFields(data, ["nom_res", "alias", "usuario", "password", "rol", "estado"]);
+  validateUserPayload(data, true);
+  const duplicate = await pool.query("SELECT 1 FROM usuarios WHERE LOWER(usuario)=LOWER($1)", [cleanText(data.usuario)]);
+  if (duplicate.rowCount) {
+    throw Object.assign(new Error("Ese nombre de usuario ya está registrado."), { status: 409 });
+  }
   const password = await bcrypt.hash(String(data.password), 12);
   const { rows } = await pool.query(
     `INSERT INTO usuarios (nom_res,alias,usuario,password,subarea_id,rol,estado)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
      RETURNING id,nom_res,alias,usuario,rol,estado,subarea_id`,
-    [data.nom_res.trim(), data.alias.trim(), data.usuario.trim(), password,
+    [cleanText(data.nom_res), cleanText(data.alias), cleanText(data.usuario), password,
       data.subarea_id || null, data.rol, data.estado],
   );
   return rows[0];
 }
 
-async function updateUser(event, id) {
+async function updateUser(event, id, actor) {
   const data = bodyOf(event);
-  requireFields(data, ["nom_res", "alias", "usuario", "rol", "estado"]);
-  const values = [data.nom_res.trim(), data.alias.trim(), data.usuario.trim(),
+  validateUserPayload(data);
+  if (Number(id) === Number(actor.id) && (data.rol !== "admin" || data.estado !== "activo")) {
+    throw Object.assign(new Error("No puedes quitarte tu propio acceso de administrador."), { status: 400 });
+  }
+  const current = await pool.query("SELECT rol,estado FROM usuarios WHERE id=$1", [id]);
+  if (!current.rowCount) throw Object.assign(new Error("Usuario no encontrado."), { status: 404 });
+  if (current.rows[0].rol === "admin" && current.rows[0].estado === "activo"
+      && (data.rol !== "admin" || data.estado !== "activo")) {
+    const admins = await pool.query("SELECT COUNT(*)::int count FROM usuarios WHERE rol='admin' AND estado='activo'");
+    if (admins.rows[0].count <= 1) {
+      throw Object.assign(new Error("Debe existir al menos un administrador activo."), { status: 400 });
+    }
+  }
+  const duplicate = await pool.query(
+    "SELECT 1 FROM usuarios WHERE LOWER(usuario)=LOWER($1) AND id<>$2",
+    [cleanText(data.usuario), id],
+  );
+  if (duplicate.rowCount) {
+    throw Object.assign(new Error("Ese nombre de usuario ya está registrado."), { status: 409 });
+  }
+  const values = [cleanText(data.nom_res), cleanText(data.alias), cleanText(data.usuario),
     data.subarea_id || null, data.rol, data.estado, id];
   let query = `UPDATE usuarios SET nom_res=$1,alias=$2,usuario=$3,subarea_id=$4,rol=$5,estado=$6 WHERE id=$7`;
   if (data.password) {
@@ -352,24 +498,38 @@ function companyValues(data) {
 
 async function createCompany(event) {
   const data = bodyOf(event);
-  requireFields(data, ["alias", "razon_social", "ruc", "estado_contrato"]);
+  validateCompanyPayload(data);
+  const normalized = {
+    ...data,
+    alias: cleanText(data.alias),
+    razon_social: cleanText(data.razon_social),
+    ruc: cleanText(data.ruc),
+    correo_principal: cleanText(data.correo_principal),
+  };
   const columns = companyFields.join(",");
   const placeholders = companyFields.map((_, i) => `$${i + 1}`).join(",");
   const { rows } = await pool.query(
     `INSERT INTO empresas (${columns}) VALUES (${placeholders})
      RETURNING id,alias,razon_social,ruc,estado_contrato`,
-    companyValues(data),
+    companyValues(normalized),
   );
   return rows[0];
 }
 
 async function updateCompany(event, id) {
   const data = bodyOf(event);
-  requireFields(data, ["alias", "razon_social", "ruc", "estado_contrato"]);
+  validateCompanyPayload(data);
+  const normalized = {
+    ...data,
+    alias: cleanText(data.alias),
+    razon_social: cleanText(data.razon_social),
+    ruc: cleanText(data.ruc),
+    correo_principal: cleanText(data.correo_principal),
+  };
   const assignments = companyFields.map((field, i) => `${field}=$${i + 1}`).join(",");
   const result = await pool.query(
     `UPDATE empresas SET ${assignments} WHERE id=$${companyFields.length + 1}`,
-    [...companyValues(data), id],
+    [...companyValues(normalized), id],
   );
   if (!result.rowCount) throw Object.assign(new Error("Empresa no encontrada."), { status: 404 });
 }
@@ -385,9 +545,19 @@ async function listTasks() {
 async function createTask(event) {
   const data = bodyOf(event);
   requireFields(data, ["nombre_tarea", "proyecto_id"]);
+  const name = cleanText(data.nombre_tarea);
+  const projectId = Number(data.proyecto_id);
+  if (name.length < 3 || !Number.isInteger(projectId) || projectId < 1) {
+    throw Object.assign(new Error("El nombre o proyecto de la tarea no es válido."), { status: 400 });
+  }
+  const duplicate = await pool.query(
+    "SELECT 1 FROM tareas WHERE proyecto_id=$1 AND LOWER(nombre_tarea)=LOWER($2)",
+    [projectId, name],
+  );
+  if (duplicate.rowCount) throw Object.assign(new Error("La tarea ya existe en ese proyecto."), { status: 409 });
   const { rows } = await pool.query(
     "INSERT INTO tareas (nombre_tarea,proyecto_id) VALUES ($1,$2) RETURNING *",
-    [data.nombre_tarea.trim(), data.proyecto_id],
+    [name, projectId],
   );
   return rows[0];
 }
@@ -395,14 +565,25 @@ async function createTask(event) {
 async function updateTask(event, id) {
   const data = bodyOf(event);
   requireFields(data, ["nombre_tarea", "proyecto_id"]);
+  const name = cleanText(data.nombre_tarea);
+  const projectId = Number(data.proyecto_id);
+  if (name.length < 3 || !Number.isInteger(projectId) || projectId < 1) {
+    throw Object.assign(new Error("El nombre o proyecto de la tarea no es válido."), { status: 400 });
+  }
+  const duplicate = await pool.query(
+    "SELECT 1 FROM tareas WHERE proyecto_id=$1 AND LOWER(nombre_tarea)=LOWER($2) AND id<>$3",
+    [projectId, name, id],
+  );
+  if (duplicate.rowCount) throw Object.assign(new Error("La tarea ya existe en ese proyecto."), { status: 409 });
   const result = await pool.query(
     "UPDATE tareas SET nombre_tarea=$1,proyecto_id=$2 WHERE id=$3",
-    [data.nombre_tarea.trim(), data.proyecto_id, id],
+    [name, projectId, id],
   );
   if (!result.rowCount) throw Object.assign(new Error("Tarea no encontrada."), { status: 404 });
 }
 
 async function listAssignments(event) {
+  await synchronizeOperationalStates();
   const query = event.queryStringParameters || {};
   const where = [];
   const params = [];
@@ -444,25 +625,33 @@ async function listAssignments(event) {
 
 async function createAssignment(event) {
   const data = bodyOf(event);
-  requireFields(data, ["usuario_ids", "empresa_id", "tarea_id", "fecha_meta"]);
-  if (!Array.isArray(data.usuario_ids) || !data.usuario_ids.length) {
-    throw Object.assign(new Error("Selecciona al menos un trabajador."), { status: 400 });
+  const normalized = validateAssignmentPayload(data);
+  const requestedState = data.estado || "pendiente";
+  requireAssignmentState(requestedState);
+  if (requestedState === "completada") {
+    throw Object.assign(new Error("Una tarea debe completarse registrando también su fecha realizada."), { status: 400 });
   }
-  requireAssignmentState(data.estado || "pendiente");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await ensureAssignmentReferences(client, data, normalized);
+    const stateResult = await client.query(
+      "SELECT CASE WHEN $1::date<CURRENT_DATE AND $2='pendiente' THEN 'vencida' ELSE $2 END estado",
+      [data.fecha_meta, requestedState],
+    );
+    const state = stateResult.rows[0].estado;
     const next = await client.query("SELECT get_next_asignacion_id() nuevo_id");
     const id = next.rows[0].nuevo_id;
-    for (const userId of [...new Set(data.usuario_ids)]) {
+    for (const userId of normalized.usuarioIds) {
       await client.query(
         `INSERT INTO asignaciones (id,usuario_id,empresa_id,tarea_id,fecha_meta,estado,peso)
          OVERRIDING SYSTEM VALUE VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [id, userId, data.empresa_id, data.tarea_id, data.fecha_meta, data.estado || "pendiente", data.peso || 1],
+        [id, userId, normalized.empresaId, normalized.tareaId, data.fecha_meta, state, normalized.peso],
       );
     }
+    await synchronizeOperationalStates(client);
     await client.query("COMMIT");
-    return { id };
+    return { id, estado: state };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -473,30 +662,60 @@ async function createAssignment(event) {
 
 async function updateAssignment(event, id) {
   const data = bodyOf(event);
-  requireFields(data, ["usuario_ids", "empresa_id", "tarea_id", "fecha_meta", "estado"]);
-  const desired = [...new Set(data.usuario_ids.map(Number))];
+  const normalized = validateAssignmentPayload(data);
   requireAssignmentState(data.estado);
-  if (!desired.length) throw Object.assign(new Error("Selecciona al menos un trabajador."), { status: 400 });
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const current = await client.query("SELECT usuario_id FROM asignaciones WHERE id=$1", [id]);
+    const current = await client.query(
+      "SELECT usuario_id,empresa_id,tarea_id,fecha_meta,estado,peso FROM asignaciones WHERE id=$1 ORDER BY usuario_id",
+      [id],
+    );
     if (!current.rowCount) throw Object.assign(new Error("Asignación no encontrada."), { status: 404 });
+    await ensureAssignmentReferences(client, data, normalized, id);
     const existing = current.rows.map((row) => Number(row.usuario_id));
-    const remove = existing.filter((userId) => !desired.includes(userId));
-    const add = desired.filter((userId) => !existing.includes(userId));
+    const wasCompleted = current.rows.every((row) => row.estado === "completada");
+    if (data.estado === "completada" && !wasCompleted) {
+      throw Object.assign(new Error("Completa la tarea desde el flujo de progreso para registrar la fecha realizada."), { status: 400 });
+    }
+    if (wasCompleted && data.estado === "completada") {
+      const first = current.rows[0];
+      const currentDate = new Date(first.fecha_meta).toISOString().slice(0, 10);
+      const sameUsers = existing.length === normalized.usuarioIds.length
+        && existing.every((userId) => normalized.usuarioIds.includes(userId));
+      if (!sameUsers || Number(first.empresa_id) !== normalized.empresaId
+          || Number(first.tarea_id) !== normalized.tareaId || currentDate !== data.fecha_meta) {
+        throw Object.assign(new Error("Reabre la tarea antes de cambiar responsables, empresa, tarea o fecha."), { status: 400 });
+      }
+    }
+    const stateResult = await client.query(
+      "SELECT CASE WHEN $1::date<CURRENT_DATE AND $2='pendiente' THEN 'vencida' ELSE $2 END estado",
+      [data.fecha_meta, data.estado],
+    );
+    const state = stateResult.rows[0].estado;
+    const remove = existing.filter((userId) => !normalized.usuarioIds.includes(userId));
+    const add = normalized.usuarioIds.filter((userId) => !existing.includes(userId));
+    if (wasCompleted && state !== "completada") {
+      await client.query("DELETE FROM registros_tareas WHERE asignacion_id=$1", [id]);
+    } else if (remove.length) {
+      await client.query(
+        "DELETE FROM registros_tareas WHERE asignacion_id=$1 AND usuario_id=ANY($2::int[])",
+        [id, remove],
+      );
+    }
     await client.query(
       "UPDATE asignaciones SET empresa_id=$1,tarea_id=$2,fecha_meta=$3,estado=$4,peso=$5 WHERE id=$6",
-      [data.empresa_id, data.tarea_id, data.fecha_meta, data.estado, data.peso || 1, id],
+      [normalized.empresaId, normalized.tareaId, data.fecha_meta, state, normalized.peso, id],
     );
     if (remove.length) await client.query("DELETE FROM asignaciones WHERE id=$1 AND usuario_id=ANY($2::int[])", [id, remove]);
     for (const userId of add) {
       await client.query(
         `INSERT INTO asignaciones (id,usuario_id,empresa_id,tarea_id,fecha_meta,estado,peso)
          OVERRIDING SYSTEM VALUE VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [id, userId, data.empresa_id, data.tarea_id, data.fecha_meta, data.estado, data.peso || 1],
+        [id, userId, normalized.empresaId, normalized.tareaId, data.fecha_meta, state, normalized.peso],
       );
     }
+    await synchronizeOperationalStates(client);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -526,6 +745,7 @@ async function deleteAssignment(id) {
         [item.empresa_id, item.tarea_id, item.fecha_meta],
       );
     }
+    await synchronizeOperationalStates(client);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -768,6 +988,7 @@ async function previewPdfSchedule(event) {
 }
 
 async function listSchedule(event) {
+  await synchronizeOperationalStates();
   const query = event.queryStringParameters || {};
   const month = Number(query.month || new Date().getMonth() + 1);
   const year = Number(query.year || new Date().getFullYear());
@@ -814,21 +1035,35 @@ async function importSchedule(event) {
   if (!Array.isArray(data.rows) || !data.rows.length) {
     throw Object.assign(new Error("No hay filas para importar."), { status: 400 });
   }
+  if (data.rows.length > 5000) {
+    throw Object.assign(new Error("La importación supera el máximo de 5000 registros por operación."), { status: 400 });
+  }
   const client = await pool.connect();
   let inserted = 0;
   try {
     await client.query("BEGIN");
     for (const row of data.rows) {
       requireFields(row, ["tarea_id", "empresa_id", "periodo_mes", "periodo_anio", "fecha_vencimiento"]);
+      const tareaId = Number(row.tarea_id);
+      const empresaId = Number(row.empresa_id);
+      const month = Number(row.periodo_mes);
+      const year = Number(row.periodo_anio);
+      if (!Number.isInteger(tareaId) || tareaId < 1 || !Number.isInteger(empresaId) || empresaId < 1
+          || !Number.isInteger(month) || month < 1 || month > 12
+          || !Number.isInteger(year) || year < 2024 || year > 2100
+          || !isISODate(row.fecha_vencimiento)) {
+        throw Object.assign(new Error("Uno de los registros del cronograma contiene datos inválidos."), { status: 400 });
+      }
       const result = await client.query(`
         INSERT INTO cronograma_pdt (tarea_id,empresa_id,periodo_mes,periodo_anio,fecha_vencimiento)
         SELECT $1,$2,$3,$4,$5
         WHERE NOT EXISTS (
           SELECT 1 FROM cronograma_pdt
           WHERE tarea_id=$1 AND empresa_id=$2 AND periodo_mes=$3 AND periodo_anio=$4
-        )`, [row.tarea_id, row.empresa_id, row.periodo_mes, row.periodo_anio, row.fecha_vencimiento]);
+        )`, [tareaId, empresaId, month, year, row.fecha_vencimiento]);
       inserted += result.rowCount;
     }
+    await synchronizeOperationalStates(client);
     await client.query("COMMIT");
     return { inserted, skipped: data.rows.length - inserted };
   } catch (error) {
@@ -842,23 +1077,50 @@ async function importSchedule(event) {
 async function assignSchedule(event, scheduleId) {
   const data = bodyOf(event);
   requireFields(data, ["usuario_ids"]);
-  if (!data.usuario_ids.length) throw Object.assign(new Error("Selecciona al menos un trabajador."), { status: 400 });
+  if (!Array.isArray(data.usuario_ids) || !data.usuario_ids.length) {
+    throw Object.assign(new Error("Selecciona al menos un trabajador."), { status: 400 });
+  }
+  const userIds = [...new Set(data.usuario_ids.map(Number))];
+  const weight = Number(data.peso ?? 1);
+  if (userIds.some((id) => !Number.isInteger(id) || id < 1)
+      || !Number.isInteger(weight) || weight < 1 || weight > 10) {
+    throw Object.assign(new Error("Los responsables o el peso de la tarea no son válidos."), { status: 400 });
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const item = await client.query("SELECT * FROM cronograma_pdt WHERE id=$1 FOR UPDATE", [scheduleId]);
     if (!item.rowCount) throw Object.assign(new Error("Registro de cronograma no encontrado."), { status: 404 });
+    const users = await client.query(
+      "SELECT id FROM usuarios WHERE id=ANY($1::int[]) AND rol='trabajador' AND estado='activo'",
+      [userIds],
+    );
+    if (users.rowCount !== userIds.length) {
+      throw Object.assign(new Error("Todos los responsables deben ser trabajadores activos."), { status: 400 });
+    }
+    const existing = await client.query(
+      "SELECT 1 FROM asignaciones WHERE empresa_id=$1 AND tarea_id=$2 AND fecha_meta=$3 LIMIT 1",
+      [item.rows[0].empresa_id, item.rows[0].tarea_id, item.rows[0].fecha_vencimiento],
+    );
+    if (existing.rowCount) {
+      throw Object.assign(new Error("Este vencimiento ya tiene responsables asignados."), { status: 409 });
+    }
     const next = await client.query("SELECT get_next_asignacion_id() nuevo_id");
     const id = next.rows[0].nuevo_id;
-    for (const userId of [...new Set(data.usuario_ids)]) {
+    const stateResult = await client.query(
+      "SELECT CASE WHEN $1::date<CURRENT_DATE THEN 'vencida' ELSE 'pendiente' END estado",
+      [item.rows[0].fecha_vencimiento],
+    );
+    for (const userId of userIds) {
       await client.query(
         `INSERT INTO asignaciones (id,usuario_id,empresa_id,tarea_id,fecha_meta,estado,peso)
-         OVERRIDING SYSTEM VALUE VALUES ($1,$2,$3,$4,$5,'pendiente',$6)`,
+         OVERRIDING SYSTEM VALUE VALUES ($1,$2,$3,$4,$5,$6,$7)`,
         [id, userId, item.rows[0].empresa_id, item.rows[0].tarea_id,
-          item.rows[0].fecha_vencimiento, data.peso || 1],
+          item.rows[0].fecha_vencimiento, stateResult.rows[0].estado, weight],
       );
     }
     await client.query("UPDATE cronograma_pdt SET asignado=true WHERE id=$1", [scheduleId]);
+    await synchronizeOperationalStates(client);
     await client.query("COMMIT");
     return { assignmentId: id };
   } catch (error) {
@@ -870,19 +1132,25 @@ async function assignSchedule(event, scheduleId) {
 }
 
 async function workerTasks(userId) {
+  await synchronizeOperationalStates();
   const { rows } = await pool.query(`
     SELECT a.id,t.nombre_tarea titulo,p.nombre_proyecto proyecto,a.fecha_meta fecha_limite,
       a.estado,e.razon_social empresa,e.alias empresa_alias,a.peso,
       rt.fecha_realizada,rt.rendimiento
     FROM asignaciones a JOIN tareas t ON t.id=a.tarea_id
     JOIN proyectos p ON p.id=t.proyecto_id JOIN empresas e ON e.id=a.empresa_id
-    LEFT JOIN registros_tareas rt ON rt.asignacion_id=a.id AND rt.usuario_id=a.usuario_id
+    LEFT JOIN LATERAL (
+      SELECT fecha_realizada,rendimiento FROM registros_tareas
+      WHERE asignacion_id=a.id AND usuario_id=a.usuario_id
+      ORDER BY id DESC LIMIT 1
+    ) rt ON TRUE
     WHERE a.usuario_id=$1 ORDER BY
       CASE WHEN a.estado='completada' THEN 1 ELSE 0 END,a.fecha_meta`, [userId]);
   return rows;
 }
 
 async function workerTaskDetail(id, user) {
+  await synchronizeOperationalStates();
   const params = [id];
   let condition = "";
   if (user.rol !== "admin") {
@@ -896,59 +1164,84 @@ async function workerTaskDetail(id, user) {
     FROM asignaciones a JOIN empresas e ON e.id=a.empresa_id
     JOIN tareas t ON t.id=a.tarea_id JOIN proyectos p ON p.id=t.proyecto_id
     JOIN usuarios u ON u.id=a.usuario_id
-    LEFT JOIN registros_tareas rt ON rt.asignacion_id=a.id AND rt.usuario_id=a.usuario_id
+    LEFT JOIN LATERAL (
+      SELECT fecha_realizada,rendimiento FROM registros_tareas
+      WHERE asignacion_id=a.id AND usuario_id=a.usuario_id
+      ORDER BY id DESC LIMIT 1
+    ) rt ON TRUE
     WHERE a.id=$1 ${condition} LIMIT 1`, params);
   if (!rows[0]) throw Object.assign(new Error("Tarea no encontrada."), { status: 404 });
   return rows[0];
 }
 
 function performance(doneDate, dueDate) {
-  const done = new Date(`${String(doneDate).slice(0, 10)}T12:00:00`);
-  const due = new Date(`${String(dueDate).slice(0, 10)}T12:00:00`);
+  const normalize = (value) => value instanceof Date
+    ? value.toISOString().slice(0, 10)
+    : String(value).slice(0, 10);
+  const doneParts = normalize(doneDate).split("-").map(Number);
+  const dueParts = normalize(dueDate).split("-").map(Number);
+  const done = Date.UTC(doneParts[0], doneParts[1] - 1, doneParts[2]);
+  const due = Date.UTC(dueParts[0], dueParts[1] - 1, dueParts[2]);
   const days = Math.round((done - due) / 86_400_000);
   return days <= 0 ? "OPTIMO" : days <= 3 ? "MEDIO" : "BAJO";
 }
 
 async function updateWorkerTask(event, id, user) {
   const data = bodyOf(event);
-  requireFields(data, ["estado", "fecha_realizada"]);
+  requireFields(data, ["estado"]);
   requireAssignmentState(data.estado);
+  if (data.estado === "completada" && !isISODate(data.fecha_realizada)) {
+    throw Object.assign(new Error("Indica una fecha realizada válida para completar la tarea."), { status: 400 });
+  }
   const detail = await workerTaskDetail(id, user);
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const group = data.estado === "completada"
-      ? await client.query(
+    let rating = null;
+    if (data.estado === "completada") {
+      const futureDate = await client.query("SELECT $1::date>CURRENT_DATE future", [data.fecha_realizada]);
+      if (futureDate.rows[0].future) {
+        throw Object.assign(new Error("La fecha realizada no puede estar en el futuro."), { status: 400 });
+      }
+      const group = await client.query(
           "SELECT id,usuario_id FROM asignaciones WHERE tarea_id=$1 AND empresa_id=$2 AND fecha_meta=$3",
           [detail.tarea_id, detail.empresa_id, detail.fecha_meta],
-        )
-      : { rows: [{ id: detail.id, usuario_id: detail.usuario_id }] };
-    const rating = performance(data.fecha_realizada, detail.fecha_meta);
-    for (const row of group.rows) {
-      const existing = await client.query(
-        "SELECT id FROM registros_tareas WHERE asignacion_id=$1 AND usuario_id=$2 LIMIT 1",
-        [row.id, row.usuario_id],
       );
-      if (existing.rowCount) {
-        await client.query(
-          "UPDATE registros_tareas SET fecha_realizada=$1,rendimiento=$2 WHERE id=$3",
-          [data.fecha_realizada, rating, existing.rows[0].id],
+      rating = performance(data.fecha_realizada, detail.fecha_meta);
+      for (const row of group.rows) {
+        const existing = await client.query(
+          "SELECT id FROM registros_tareas WHERE asignacion_id=$1 AND usuario_id=$2 ORDER BY id DESC LIMIT 1",
+          [row.id, row.usuario_id],
         );
-      } else {
-        await client.query(
-          "INSERT INTO registros_tareas (asignacion_id,usuario_id,fecha_realizada,rendimiento) VALUES ($1,$2,$3,$4)",
-          [row.id, row.usuario_id, data.fecha_realizada, rating],
-        );
+        if (existing.rowCount) {
+          await client.query(
+            "UPDATE registros_tareas SET fecha_realizada=$1,rendimiento=$2 WHERE id=$3",
+            [data.fecha_realizada, rating, existing.rows[0].id],
+          );
+        } else {
+          await client.query(
+            "INSERT INTO registros_tareas (asignacion_id,usuario_id,fecha_realizada,rendimiento) VALUES ($1,$2,$3,$4)",
+            [row.id, row.usuario_id, data.fecha_realizada, rating],
+          );
+        }
       }
-    }
-    if (data.estado === "completada") {
       await client.query(
         "UPDATE asignaciones SET estado='completada' WHERE tarea_id=$1 AND empresa_id=$2 AND fecha_meta=$3",
         [detail.tarea_id, detail.empresa_id, detail.fecha_meta],
       );
     } else {
-      await client.query("UPDATE asignaciones SET estado=$1 WHERE id=$2", [data.estado, id]);
+      await client.query(`
+        DELETE FROM registros_tareas rt
+        USING asignaciones a
+        WHERE rt.asignacion_id=a.id AND rt.usuario_id=a.usuario_id
+          AND a.tarea_id=$1 AND a.empresa_id=$2 AND a.fecha_meta=$3`,
+      [detail.tarea_id, detail.empresa_id, detail.fecha_meta]);
+      await client.query(
+        "UPDATE asignaciones SET estado=$1 WHERE tarea_id=$2 AND empresa_id=$3 AND fecha_meta=$4",
+        [data.estado, detail.tarea_id, detail.empresa_id, detail.fecha_meta],
+      );
     }
+    await synchronizeOperationalStates(client);
     await client.query("COMMIT");
     return { rendimiento: rating };
   } catch (error) {
@@ -960,6 +1253,7 @@ async function updateWorkerTask(event, id, user) {
 }
 
 async function getProfile(userId) {
+  await synchronizeOperationalStates();
   const [profile, stats] = await Promise.all([
     pool.query(`
       SELECT u.id,u.nom_res,u.alias,u.usuario,u.rol,u.estado,u.fecha_creacion,
@@ -969,8 +1263,9 @@ async function getProfile(userId) {
     pool.query(`
       SELECT COUNT(*)::int total,
         COUNT(*) FILTER (WHERE a.estado='completada')::int completadas,
-        COUNT(*) FILTER (WHERE a.estado='pendiente')::int pendientes,
-        COUNT(*) FILTER (WHERE rt.rendimiento='OPTIMO')::int optimas
+        COUNT(*) FILTER (WHERE a.estado<>'completada')::int pendientes,
+        COUNT(*) FILTER (WHERE a.estado='vencida')::int vencidas,
+        COUNT(*) FILTER (WHERE a.estado='completada' AND rt.rendimiento='OPTIMO')::int optimas
       FROM asignaciones a LEFT JOIN registros_tareas rt
         ON rt.asignacion_id=a.id AND rt.usuario_id=a.usuario_id
       WHERE a.usuario_id=$1`, [userId]),
@@ -978,8 +1273,23 @@ async function getProfile(userId) {
   return { profile: profile.rows[0], stats: stats.rows[0] };
 }
 
+async function deleteUser(id, actor) {
+  if (Number(id) === Number(actor.id)) {
+    throw Object.assign(new Error("No puedes eliminar tu propia cuenta mientras estás conectado."), { status: 400 });
+  }
+  const target = await pool.query("SELECT rol,estado FROM usuarios WHERE id=$1", [id]);
+  if (!target.rowCount) throw Object.assign(new Error("Usuario no encontrado."), { status: 404 });
+  if (target.rows[0].rol === "admin" && target.rows[0].estado === "activo") {
+    const admins = await pool.query("SELECT COUNT(*)::int count FROM usuarios WHERE rol='admin' AND estado='activo'");
+    if (admins.rows[0].count <= 1) {
+      throw Object.assign(new Error("Debe existir al menos un administrador activo."), { status: 400 });
+    }
+  }
+  await pool.query("DELETE FROM usuarios WHERE id=$1", [id]);
+}
+
 async function removeRecord(table, id) {
-  const allowed = new Set(["usuarios", "empresas", "tareas"]);
+  const allowed = new Set(["empresas", "tareas"]);
   if (!allowed.has(table)) throw Object.assign(new Error("Recurso inválido."), { status: 400 });
   const result = await pool.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
   if (!result.rowCount) throw Object.assign(new Error("Registro no encontrado."), { status: 404 });
@@ -1018,11 +1328,11 @@ export async function handler(event) {
     if (path === "/users" && method === "POST") return json(201, await createUser(event));
     const userMatch = path.match(/^\/users\/(\d+)$/);
     if (userMatch && method === "PUT") {
-      await updateUser(event, Number(userMatch[1]));
+      await updateUser(event, Number(userMatch[1]), user);
       return json(200, { ok: true });
     }
     if (userMatch && method === "DELETE") {
-      await removeRecord("usuarios", Number(userMatch[1]));
+      await deleteUser(Number(userMatch[1]), user);
       return json(200, { ok: true });
     }
 

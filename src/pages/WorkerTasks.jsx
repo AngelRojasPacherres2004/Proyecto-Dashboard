@@ -70,8 +70,8 @@ export default function WorkerTasks() {
             <div><span>Fecha meta</span><strong>{formatDate(detail.fecha_meta)}</strong><small>Peso {detail.peso}</small></div>
           </div>
           <div className="form-grid">
-            <Field label="Actualizar estado"><select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}><option value="pendiente">Pendiente</option><option value="completada">Completada</option></select></Field>
-            <Field label="Fecha realizada"><input required type="date" value={form.fecha_realizada} onChange={(e) => setForm({ ...form, fecha_realizada: e.target.value })} /></Field>
+            <Field label="Actualizar estado"><select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}><option value="pendiente">Pendiente</option>{form.estado === "vencida" && <option value="vencida">Vencida</option>}<option value="completada">Completada</option></select></Field>
+            {form.estado === "completada" && <Field label="Fecha realizada"><input required max={todayISO()} type="date" value={form.fecha_realizada} onChange={(e) => setForm({ ...form, fecha_realizada: e.target.value })} /></Field>}
             <div className="form-note span-2">Al completar una tarea compartida, el sistema registra el avance de todo el grupo y calcula el rendimiento según la fecha meta.</div>
             <div className="form-actions span-2"><button type="button" className="button button--ghost" onClick={() => setDetail(null)}>Cancelar</button><button className="button button--primary" disabled={busy}>{busy ? "Guardando…" : "Guardar progreso"}</button></div>
           </div>

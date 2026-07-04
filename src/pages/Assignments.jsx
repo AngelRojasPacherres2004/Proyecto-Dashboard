@@ -86,8 +86,8 @@ export default function Assignments({ references }) {
       </div>
       {!items ? <Loading /> : visible.length ? <div className="assignment-list">
         {visible.map((item) => {
-          const due = new Date(`${String(item.fecha_meta).slice(0, 10)}T12:00:00`);
-          const overdue = item.estado !== "completada" && due < new Date();
+          const overdue = item.estado !== "completada"
+            && String(item.fecha_meta).slice(0, 10) < todayISO();
           return <article className="assignment-card" key={item.id}>
             <div className="assignment-id"><small>Asignación</small><strong>#{item.id}</strong></div>
             <div className="assignment-main"><span className="assignment-project">{item.proyecto}</span><h3>{item.tarea}</h3><p>{item.empresa}</p></div>
@@ -109,7 +109,7 @@ export default function Assignments({ references }) {
           <Field label="Tarea"><select required value={editing.tarea_id} onChange={(e) => setEditing({ ...editing, tarea_id: e.target.value })}><option value="">Seleccionar tarea</option>{references?.tasks?.map((item) => <option key={item.id} value={item.id}>{item.nombre_proyecto} · {item.nombre_tarea}</option>)}</select></Field>
           <Field label="Fecha meta"><input required type="date" value={editing.fecha_meta} onChange={(e) => setEditing({ ...editing, fecha_meta: e.target.value })} /></Field>
           <Field label="Peso"><input required min="1" max="10" type="number" value={editing.peso} onChange={(e) => setEditing({ ...editing, peso: Number(e.target.value) })} /></Field>
-          {editing.id && <Field label="Estado" className="span-2"><select value={editing.estado} onChange={(e) => setEditing({ ...editing, estado: e.target.value })}><option value="pendiente">Pendiente</option><option value="completada">Completada</option><option value="vencida">Vencida</option></select></Field>}
+          {editing.id && <Field label="Estado" className="span-2"><select value={editing.estado} onChange={(e) => setEditing({ ...editing, estado: e.target.value })}><option value="pendiente">Pendiente</option>{editing.estado === "completada" && <option value="completada">Completada</option>}<option value="vencida">Vencida</option></select><small>Para completar una tarea nueva debe registrarse también su fecha realizada desde el flujo de progreso.</small></Field>}
           <div className="field span-2"><span>Responsables</span><div className="people-picker">
             {references?.users?.map((person) => <button type="button" key={person.id} className={editing.usuario_ids.includes(person.id) ? "selected" : ""} onClick={() => toggleUser(person.id)}>
               <span><UserRound size={16} /></span><div><strong>{person.nom_res}</strong><small>{person.alias}</small></div><i />

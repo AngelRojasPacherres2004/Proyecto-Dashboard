@@ -22,7 +22,7 @@ export default function Profile() {
       <section className="worker-summary">
         <div><span className="worker-summary__icon blue"><UserCircle2 /></span><div><small>Tareas asignadas</small><strong>{stats.total}</strong></div></div>
         <div><span className="worker-summary__icon green"><CheckCircle2 /></span><div><small>Completadas</small><strong>{stats.completadas}</strong></div></div>
-        <div><span className="worker-summary__icon amber"><Clock3 /></span><div><small>Pendientes</small><strong>{stats.pendientes}</strong></div></div>
+        <div><span className="worker-summary__icon amber"><Clock3 /></span><div><small>Por completar · {stats.vencidas || 0} vencidas</small><strong>{stats.pendientes}</strong></div></div>
         <div><span className="worker-summary__icon violet"><Medal /></span><div><small>Rendimiento óptimo</small><strong>{stats.optimas}</strong></div></div>
       </section>
       <section className="profile-details panel">

@@ -70,6 +70,23 @@ No configures secretos con el prefijo `VITE_`: ese prefijo los haría visibles e
 ```bash
 npm run check
 npm run build
+npm run qa:integration
 ```
 
 La compilación de producción se genera en `dist/`.
+
+`qa:integration` crea datos temporales con prefijo QA, prueba autenticación,
+permisos, CRUD, vencimientos, progreso, rendimiento y cronograma, y elimina
+esos datos al finalizar aunque una prueba falle.
+
+## Migraciones de base de datos
+
+Para una base existente que todavía conserve las columnas originales:
+
+```bash
+npm run db:migrate
+```
+
+La migración amplía las columnas de credenciales para soportar AES-256-GCM,
+añade restricciones de integridad e índices, y sincroniza vencimientos e
+indicadores del cronograma. Es idempotente y puede ejecutarse nuevamente.
