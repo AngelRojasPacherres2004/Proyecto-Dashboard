@@ -403,8 +403,10 @@ h1, h2, h3, strong { font-family: "Manrope", "DM Sans", sans-serif; }
 .login-features strong { color: #eef2f6; font-size: 12px; }
 .login-features small { margin-top: 4px; color: #8495ab; font-size: 10px; }
 .login-story__footer { color: #62738a; font-size: 9px; }
-.login-form-side { display: grid; place-items: center; padding: 35px; }
-.login-card { width: min(390px,100%); }
+.login-form-side { position: relative; isolation: isolate; display: grid; place-items: center; padding: 35px; overflow: hidden; }
+.login-form-side::after { content: ""; position: absolute; z-index: 1; inset: 0; pointer-events: none; background: radial-gradient(circle at center, rgba(6,6,7,.5), rgba(6,6,7,.76)), linear-gradient(90deg, rgba(6,6,7,.36), rgba(6,6,7,.6)); }
+.login-form-video { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.login-card { position: relative; z-index: 2; width: min(390px,100%); }
 .login-card__top { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
 .login-icon { width: 39px; height: 39px; display: grid; place-items: center; border-radius: 11px; color: #477dbe; background: #e9f1fb; }
 .login-card h2 { margin: 0 0 7px; font-size: 30px; letter-spacing: -1px; }

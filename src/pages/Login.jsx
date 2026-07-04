@@ -38,6 +38,17 @@ export default function Login({ onLogin }) {
         <small className="login-story__footer">Nexo Contable · Sistema de gestión operativa</small>
       </section>
       <section className="login-form-side">
+        <video
+          className="login-form-video"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          aria-hidden="true"
+        >
+          <source src="/login_derecha.mp4" type="video/mp4" />
+        </video>
         <form className="login-card" onSubmit={submit}>
           <div className="login-card__top">
             <span className="login-icon"><LockKeyhole size={22} /></span>
