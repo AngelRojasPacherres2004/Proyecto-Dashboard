@@ -1,1 +1,10 @@
 venv/
+node_modules/
+dist/
+.netlify/
+.env
+.env.*
+!.env.example
+*.log
+__pycache__/
+*.pyc
